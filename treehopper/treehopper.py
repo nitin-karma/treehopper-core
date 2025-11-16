@@ -23,8 +23,7 @@ agents = {}
 # 🔥 Disable real embedding model — use dummy vectors instead
 memory = Client(Settings(is_persistent=True, persist_directory=".treehopper_memory"))
 collection = memory.get_or_create_collection(
-    "treehopper",
-    embedding_function=embedding_functions.DefaultEmbeddingFunction()
+    "treehopper", embedding_function=embedding_functions.DefaultEmbeddingFunction()
 )
 
 
@@ -54,8 +53,10 @@ async def auth_middleware(request: Request, call_next):
 
 @app.get("/agents")
 async def list_agents():
-    return [{"path": p, "method": a["method"], "goal": a["goal"], "tags": a["tags"]} for p, a in agents.items()]
-
+    return [
+        {"path": p, "method": a["method"], "goal": a["goal"], "tags": a["tags"]}
+        for p, a in agents.items()
+    ]
 
 
 @app.post("/chain")
@@ -68,7 +69,9 @@ async def chain(request: Request):
         params = step.get("params", {})
         func = agents[path]["func"]
         # Call sync or async functions safely
-        result = func(**params) if not hasattr(func, "__await__") else await func(**params)
+        result = (
+            func(**params) if not hasattr(func, "__await__") else await func(**params)
+        )
         results.append(result)
     return {"results": results}
 
@@ -84,6 +87,7 @@ async def store(key: str, content: str):
 async def search(query: str):
     results = collection.query(query_texts=[query], n_results=3)
     return {"results": {"documents": results["documents"][0]}}
+
 
 def discover_agents():
     """Auto-load agents from treehopper/agents directory."""

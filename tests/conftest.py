@@ -1,7 +1,10 @@
+import os
+import sys
 import pytest
-import sys, os
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 os.environ["TREEHOPPER_AUTODISCOVERY"] = "0"
+
 
 @pytest.fixture(autouse=True)
 def set_test_env(monkeypatch):
@@ -15,6 +18,7 @@ def set_test_env(monkeypatch):
 
 class FakeLLM:
     """Mock LLM provider response for deterministic tests."""
+
     def chat(self, prompt, **kwargs):
         return f"MOCK_RESPONSE: {prompt}"
 

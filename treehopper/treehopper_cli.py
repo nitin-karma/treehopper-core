@@ -1,7 +1,13 @@
-import sys, json, requests
-from tabulate import tabulate
+import json
 import os
+import sys
+import uvicorn
+import requests
+import subprocess
+import time
 from dotenv import load_dotenv
+from tabulate import tabulate
+
 load_dotenv()
 
 API_KEY = {"x-api-key": "demo-key-123"}
@@ -9,11 +15,14 @@ BASE_URL = "http://localhost:1560"
 
 
 def run(th_port=1560):
-    import uvicorn
     if os.getenv("PROD") == "1":
-        uvicorn.run("treehopper.treehopper:app", host="0.0.0.0", port=th_port, reload=False)
+        uvicorn.run(
+            "treehopper.treehopper:app", host="0.0.0.0", port=th_port, reload=False
+        )
     else:
-        uvicorn.run("treehopper.treehopper:app", host="0.0.0.0", port=th_port, reload=True)
+        uvicorn.run(
+            "treehopper.treehopper:app", host="0.0.0.0", port=th_port, reload=True
+        )
 
 
 def ensure_server():
@@ -21,18 +30,15 @@ def ensure_server():
         requests.get(f"{BASE_URL}/agents", headers=API_KEY, timeout=1)
     except Exception:
         print("⚠️ API server not running. Starting it now...")
-        import subprocess, time
         subprocess.Popen(["treehopper", "run"])
         time.sleep(2)
 
 
 def call(path, params):
     ensure_server()
-
     r = requests.get(f"{BASE_URL}/agents", headers=API_KEY)
     r.raise_for_status()
     agent_list = r.json()
-
     method = next((a["method"] for a in agent_list if a["path"] == path), None)
     if not method:
         print(f"❌ Agent not found: {path}")

@@ -1,16 +1,36 @@
+# macOS
 .DS_Store
 */.DS_Store
-treehopper.egg-info/
-*.egg-info/
+
+# Python cache and artifacts
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.env
+
+# Virtual environments
+venv/
+.venv/
+.env/
+
+# Build / packaging
+treehopper.egg-info/
+*.egg-info/
+dist/
+build/
+
+# Local DB / persistent memory
 .treehopper_memory/
 .cache/
 .chromadb/
 *.db
 *.sqlite
-dist/
-build/
+
+# pytest
+.pytest_cache/
+
+# Misc
+*.log
+
+#precomit yaml
+.pre-commit-config.yaml

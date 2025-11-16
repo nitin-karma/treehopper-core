@@ -1,9 +1,14 @@
 # agents/llm_compare.py
-
 from treehopper.treehopper import agent
 from treehopper.treehopper_llm import call_llm
 
-@agent("/llm/compare", method="POST", goal="Compare LLM responses across providers", tags=["llm"])
+
+@agent(
+    "/llm/compare",
+    method="POST",
+    goal="Compare LLM responses across providers",
+    tags=["llm"],
+)
 async def llm_compare(prompt: str, api_keys: dict):
     results = {}
     for provider, key in api_keys.items():
