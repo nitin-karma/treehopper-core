@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.treehopper_memory/
+.cache/
+.chromadb/
+*.db
+*.sqlite
+dist/
+build/
