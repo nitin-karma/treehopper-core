@@ -6,7 +6,7 @@ from treehopper.treehopper import agent
     "/notify_slack",
     method="POST",
     goal="Send a message to Slack via webhook",
-    tags=["slack", "notify"],
+    tags=["Example Agents"],
 )
 async def notify_slack(webhook_url: str, message: str):
     try:

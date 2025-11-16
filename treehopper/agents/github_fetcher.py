@@ -6,7 +6,7 @@ from treehopper.treehopper import agent
     "/github",
     method="GET",
     goal="Fetch GitHub repo metadata",
-    tags=["github", "devtools"],
+    tags=["Example Agents"],
 )
 async def github(repo: str):
     try:

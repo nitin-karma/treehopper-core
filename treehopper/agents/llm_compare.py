@@ -7,7 +7,7 @@ from treehopper.treehopper_llm import call_llm
     "/llm/compare",
     method="POST",
     goal="Compare LLM responses across providers",
-    tags=["llm"],
+    tags=["Example Agents"],
 )
 async def llm_compare(prompt: str, api_keys: dict):
     results = {}

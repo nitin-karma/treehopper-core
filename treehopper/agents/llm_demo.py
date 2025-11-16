@@ -4,7 +4,12 @@ from treehopper.treehopper import agent
 from treehopper.treehopper_llm import call_llm
 
 
-@agent("/llm/test", method="POST", goal="Test LLM provider connectivity", tags=["llm"])
+@agent(
+    "/llm/test",
+    method="POST",
+    goal="Test LLM provider connectivity",
+    tags=["Example Agents"],
+)
 async def llm_test(provider: str = "openai", api_key: Optional[str] = None):
     try:
         response = await call_llm("Say hello from Treehopper", provider, api_key)

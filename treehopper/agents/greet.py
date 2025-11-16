@@ -7,7 +7,7 @@ class GreetRequest(BaseModel):
     name: str
 
 
-@agent("/greet", method="POST", goal="Say hello")
+@agent("/greet", method="POST", goal="Greets a person by name", tags=["Example Agents"])
 async def greet(req: GreetRequest):
     message = f"Hello {req.name}"
     return JSONResponse({"message": message})

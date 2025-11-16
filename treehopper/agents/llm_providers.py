@@ -3,7 +3,10 @@ from treehopper.treehopper import agent
 
 
 @agent(
-    "/llm/providers", method="GET", goal="List supported LLM providers", tags=["llm"]
+    "/llm/providers",
+    method="GET",
+    goal="List supported LLM providers",
+    tags=["Example Agents"],
 )
 async def llm_providers():
     return {
