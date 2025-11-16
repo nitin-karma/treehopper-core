@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+python-dotenv
+requests
+pydantic
+openai
+anthropic
+google-generativeai
+tiktoken
+chromadb

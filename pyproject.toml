@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "treehopper"
+version = "0.1.0"
+description = "Agentic AI framework with auto-discovered agents, chaining, memory, and multi-provider LLM support."
+readme = "README.md"
+authors = [
+    { name = "Nitin Kumar", email = "developer@example.com" }
+]
+license = { file = "LICENSE" }
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "python-dotenv",
+    "requests",
+    "pydantic",
+    "openai",
+    "anthropic",
+    "google-generativeai",
+    "tiktoken",
+    "chromadb",
+]
+
+[project.urls]
+Homepage = "https://github.com/nitin-karma/treehopper-core"
+Issues = "https://github.com/nitin-karma/treehopper-core/issues"
+
+# CLI command
+[project.scripts]
+treehopper = "treehopper.treehopper_cli:main"
+
+[tool.setuptools]
+# Make Python find the treehopper package and subpackages (agents included)
+packages = ["treehopper"]
+
+[tool.setuptools.package-data]
+# Include agents, logo, config files, etc. in the installed package
+treehopper = [
+    "agents/*.py",
+    "*.json",
+    "*.yaml",
+    "*.yml",
+    "logo/*",
+]
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py"]
+addopts = "-vv --disable-warnings --maxfail=1"

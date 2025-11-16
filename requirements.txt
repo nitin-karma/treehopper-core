@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+httpx
+python-dotenv
+chromadb
+PyMuPDF
+pytest
+requests
+tabulate

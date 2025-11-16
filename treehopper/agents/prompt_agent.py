@@ -1,0 +1,9 @@
+# agents/prompt_agent.py
+
+from treehopper.treehopper import agent
+from treehopper.treehopper_llm import call_llm
+
+@agent("/prompt", method="POST", goal="Respond to prompt using LLM", tags=["llm"])
+async def prompt_agent(prompt: str, provider: str = "openai", api_key: str = None):
+    response = await call_llm(prompt, provider, api_key)
+    return {"response": response}
