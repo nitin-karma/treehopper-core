@@ -5,7 +5,7 @@ from treehopper.treehopper_llm import call_llm
 
 
 @agent(
-    "/llm/test",
+    "/api/v1/agents/llm/test",
     method="POST",
     goal="Test LLM provider connectivity",
     tags=["Example Agents"],

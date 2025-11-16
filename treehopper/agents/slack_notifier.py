@@ -3,7 +3,7 @@ from treehopper.treehopper import agent
 
 
 @agent(
-    "/notify_slack",
+    "/api/v1/agents/notify_slack",
     method="POST",
     goal="Send a message to Slack via webhook",
     tags=["Example Agents"],

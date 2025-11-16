@@ -2,7 +2,10 @@ from treehopper.treehopper import agent
 
 
 @agent(
-    "/math", method="GET", goal="Evaluate a math expression", tags=["Example Agents"]
+    "/api/v1/agents/math",
+    method="GET",
+    goal="Evaluate a math expression",
+    tags=["Example Agents"],
 )
 async def math(expression: str):
     try:

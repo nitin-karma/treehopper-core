@@ -3,7 +3,7 @@ from treehopper.treehopper import agent
 
 
 @agent(
-    "/github",
+    "/api/v1/agents/github",
     method="GET",
     goal="Fetch GitHub repo metadata",
     tags=["Example Agents"],

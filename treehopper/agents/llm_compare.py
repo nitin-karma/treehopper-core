@@ -4,7 +4,7 @@ from treehopper.treehopper_llm import call_llm
 
 
 @agent(
-    "/llm/compare",
+    "/api/v1/agents/llm/compare",
     method="POST",
     goal="Compare LLM responses across providers",
     tags=["Example Agents"],

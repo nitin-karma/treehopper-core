@@ -5,7 +5,7 @@ from treehopper.treehopper_llm import call_llm
 
 
 @agent(
-    "/prompt",
+    "/api/v1/agents/prompt",
     method="POST",
     goal="Respond to prompt using LLM",
     tags=["Example Agents"],

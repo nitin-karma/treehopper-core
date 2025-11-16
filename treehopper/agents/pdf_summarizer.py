@@ -5,7 +5,7 @@ from treehopper.treehopper_llm import call_llm
 
 
 @agent(
-    "/pdf/summarize",
+    "/api/v1/agents/pdf/summarize",
     method="POST",
     goal="Summarize uploaded PDF using LLM",
     tags=["Example Agents"],

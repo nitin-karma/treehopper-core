@@ -3,7 +3,7 @@ from treehopper.treehopper import agent
 
 
 @agent(
-    "/llm/providers",
+    "/api/v1/agents/llm/providers",
     method="GET",
     goal="List supported LLM providers",
     tags=["Example Agents"],
