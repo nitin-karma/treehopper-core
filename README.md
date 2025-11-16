@@ -1,5 +1,5 @@
 <p>
-  <img src="treehopper/logo/treehopper_favicon.PNG" alt="Treehopper Logo" width="25" style="vertical-align: middle; margin-right: 8px;">
+  <img src="treehopper/logo/treehopper_favicon.PNG" alt="Treehopper Logo" width="100" style="vertical-align: middle; margin-right: 8px;">
   <strong>Treehopper</strong>
 </p>
 
