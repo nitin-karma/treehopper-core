@@ -50,3 +50,4 @@ treehopper = [
 [tool.pytest.ini_options]
 python_files = ["test_*.py"]
 addopts = "-vv --disable-warnings --maxfail=1"
+asyncio_mode = "auto"

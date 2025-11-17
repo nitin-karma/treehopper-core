@@ -10,6 +10,7 @@ load_dotenv()
 async def call_llm(
     prompt: str, provider: str = "openai", api_key: Optional[str] = None
 ):
+    provider = provider.lower()
     if provider == "openai":
         return await call_openai(prompt, api_key)
     if provider == "perplexity":
