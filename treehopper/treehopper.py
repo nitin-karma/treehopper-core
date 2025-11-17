@@ -1,5 +1,6 @@
 import os
 import importlib.util
+import inspect
 from fastapi import FastAPI, Request, APIRouter
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -42,16 +43,18 @@ def agent(path, method="GET", goal="", tags=None):
     if tags is None:
         tags = []
 
-    # 🔥 AUTO-prefix agents to new format
-    if not path.startswith("/api/v1/agents/"):
-        path = "/api/v1/agents" + (path if path.startswith("/") else f"/{path}")
+    # unify paths → agents must be relative only
+    if path.startswith("/api/v1/agents/"):
+        full_path = path
+    else:
+        full_path = f"/api/v1/agents/{path.lstrip('/')}"
 
     def decorator(func):
-        agents[path] = {"func": func, "method": method, "goal": goal, "tags": tags}
+        agents[full_path] = {"func": func, "method": method, "goal": goal, "tags": tags}
         if method == "GET":
-            app.get(path, tags=tags)(func)
+            app.get(full_path, tags=tags)(func)
         else:
-            app.post(path, tags=tags)(func)
+            app.post(full_path, tags=tags)(func)
         return func
 
     return decorator
@@ -111,16 +114,28 @@ async def list_agents():
 
 @router_dev.post("/chain")
 async def chain(request: Request):
+    """Execute multiple agents sequentially. Supports sync and async agents."""
     body = await request.json()
-    results = []
-    for step in body.get("chain", []):
-        func = agents[step["path"]]["func"]
+    steps = body.get("chain", [])
+    outputs = []
+    for step in steps:
+        path = step["path"]
         params = step.get("params", {})
-        result = (
-            func(**params) if not hasattr(func, "__await__") else await func(**params)
-        )
-        results.append(result)
-    return {"results": results}
+        # 🔥 graceful missing-agent validation
+        if path not in agents:
+            return JSONResponse(
+                status_code=400, content={"error": f"Agent not found: {path}"}
+            )
+        func = agents[path]["func"]
+        sig = inspect.signature(func)
+        accepted = {k: v for k, v in params.items() if k in sig.parameters}
+        # execute async/sync
+        if inspect.iscoroutinefunction(func):
+            result = await func(**accepted)
+        else:
+            result = func(**accepted)
+        outputs.append(result)
+    return {"results": outputs}
 
 
 @app.post("/api/v1/dev/store", tags=["Devtools"])

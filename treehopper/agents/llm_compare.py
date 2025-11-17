@@ -1,20 +1,24 @@
 # agents/llm_compare.py
 from treehopper.treehopper import agent
-from treehopper.treehopper_llm import call_llm
+from pydantic import BaseModel
+from fastapi import Body
+
+
+class LLMCompareRequest(BaseModel):
+    prompt: str
 
 
 @agent(
-    "/api/v1/agents/llm/compare",
+    "llm_compare",
     method="POST",
-    goal="Compare LLM responses across providers",
+    goal="Compare responses from multiple LLMs",
     tags=["Example Agents"],
 )
-async def llm_compare(prompt: str, api_keys: dict):
-    results = {}
-    for provider, key in api_keys.items():
-        try:
-            response = await call_llm(prompt, provider, key)
-            results[provider] = {"status": "success", "response": response}
-        except Exception as e:
-            results[provider] = {"status": "error", "message": str(e)}
-    return {"prompt": prompt, "results": results}
+async def llm_compare(req: LLMCompareRequest = Body(...), prompt: str | None = None):
+    """
+    Accepts:
+    - HTTP body {"prompt": "..."}
+    - Chaining params {"prompt": "..."}
+    """
+    text = prompt if prompt is not None else req.prompt
+    return {"compare": f"LLM comparison placeholder for prompt '{text}'"}

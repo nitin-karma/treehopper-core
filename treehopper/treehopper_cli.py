@@ -26,7 +26,6 @@ def run(th_port=1560):
 
 
 def ensure_server():
-    """Start the server if not already running"""
     try:
         requests.get(f"{BASE_URL}/api/v1/dev/agents", headers=API_KEY, timeout=1)
     except Exception:
@@ -46,18 +45,22 @@ def discover_method(path: str) -> str | None:
 
 
 def call(path, params):
-    """Invoke an agent remotely via API"""
     ensure_server()
-    method = discover_method(path)
-    if not method:
+    # get full agent registry
+    r = requests.get(f"{BASE_URL}/api/v1/dev/agents", headers=API_KEY)
+    r.raise_for_status()
+    agent_list = r.json()
+    # find agent entry by path
+    agent = next((a for a in agent_list if a["path"] == path), None)
+    if not agent:
         print(f"❌ Agent not found: {path}")
         return
-
-    if method.upper() == "GET":
+    method = agent["method"]
+    # execute call
+    if method == "GET":
         response = requests.get(f"{BASE_URL}{path}", params=params, headers=API_KEY)
     else:
         response = requests.post(f"{BASE_URL}{path}", json=params, headers=API_KEY)
-
     print(response.text)
 
 
