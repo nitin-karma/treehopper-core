@@ -23,11 +23,11 @@
 
 Treehopper is a **modular agentic framework** built on FastAPI that allows developers to:
 
-🔹 Define **agents** using a lightweight decorator
-🔹 **Chain multiple agents** into workflows using a single POST endpoint
-🔹 Use **semantic memory** backed by ChromaDB
-🔹 Call **multiple LLM providers** interchangeably
-🔹 Deploy agents locally, on edge devices, or in the cloud
+- Define **agents** using a lightweight decorator
+- **Chain multiple agents** into workflows using a single POST endpoint
+- Use **semantic memory** backed by ChromaDB
+- Call **multiple LLM providers** interchangeably
+- Deploy agents locally, on edge devices, or in the cloud
 
 Treehopper is built for **AI automation, RPA, decision systems, IoT edge coordination, and agent marketplaces.**
 
