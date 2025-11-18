@@ -1,47 +1,34 @@
-from pydantic import BaseModel
 from fastapi import Body
+from fastapi.responses import JSONResponse
 from treehopper.treehopper import agent
+from pydantic import BaseModel
 
 
-class MathExpression(BaseModel):
-    expression: str | None = None
-    a: float | None = None
-    b: float | None = None
+class MathRequest(BaseModel):
+    a: float
+    b: float
 
 
-@agent(
-    "math",
-    method="POST",
-    goal="Perform simple math: expression='2+3' OR a,b → a+b",
-    tags=["Example Agents"],
-)
-async def math(
-    req: MathExpression = Body(None),
-    expression: str | None = None,
+class MathAgent:
+    async def run(self, a: float, b: float) -> dict:
+        result = a + b
+        return {"result": result, "expression": f"{a} + {b} = {result}"}
+
+
+@agent("math", method="POST", goal="Perform addition")
+async def handle(
+    request: MathRequest = Body(None),
     a: float | None = None,
     b: float | None = None,
 ):
-    """
-    Supports both:
-    - { "expression": "2+3" }
-    - { "a": 2, "b": 3 }
-    - Chaining calls: {"params": {"a": 2, "b": 3}}
-    """
+    ag = MathAgent()
 
-    # Operand mode
+    # support primitive signature for chaining
     if a is not None and b is not None:
-        return {"result": a + b}
+        return JSONResponse(await ag.run(a, b))
 
-    # Expression mode (HTTP body / direct)
-    if expression:
-        return {"result": eval(expression)}
+    # support normal body request
+    if request:
+        return JSONResponse(await ag.run(request.a, request.b))
 
-    if req:
-        # From HTTP body "expression"
-        if req.expression:
-            return {"result": eval(req.expression)}
-        # From HTTP body operands "a", "b"
-        if req.a is not None and req.b is not None:
-            return {"result": req.a + req.b}
-
-    return {"error": "Missing input. Provide expression OR a & b"}
+    return JSONResponse({"error": "Missing parameters"}, status_code=400)

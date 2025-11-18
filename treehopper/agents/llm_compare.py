@@ -1,24 +1,21 @@
-# agents/llm_compare.py
+from fastapi import Body
+from fastapi.responses import JSONResponse
 from treehopper.treehopper import agent
 from pydantic import BaseModel
-from fastapi import Body
 
 
-class LLMCompareRequest(BaseModel):
+class CompareRequest(BaseModel):
     prompt: str
 
 
-@agent(
-    "llm_compare",
-    method="POST",
-    goal="Compare responses from multiple LLMs",
-    tags=["Example Agents"],
-)
-async def llm_compare(req: LLMCompareRequest = Body(...), prompt: str | None = None):
-    """
-    Accepts:
-    - HTTP body {"prompt": "..."}
-    - Chaining params {"prompt": "..."}
-    """
-    text = prompt if prompt is not None else req.prompt
-    return {"compare": f"LLM comparison placeholder for prompt '{text}'"}
+class CompareAgent:
+    async def run(self, prompt: str) -> dict:
+        return {"summary": f"Compared: {prompt}"}
+
+
+@agent("llm_compare", method="POST", goal="Compare LLM responses")
+async def handle(
+    request: CompareRequest = Body(..., embed=False)  # 🚨 embed=False is critical
+):
+    ag = CompareAgent()
+    return JSONResponse(await ag.run(request.prompt))

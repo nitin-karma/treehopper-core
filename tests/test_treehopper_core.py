@@ -58,12 +58,17 @@ def test_sequential_chaining_multiple_agents():
     payload = {
         "chain": [
             {"path": "/api/v1/agents/greet", "params": {"name": "Alpha"}},
-            {"path": "/api/v1/agents/math", "params": {"a": 2, "b": 3}},
-            {"path": "/api/v1/agents/llm_compare", "params": {"prompt": "Test"}},
+            {"path": "/api/v1/agents/math", "params": {"a": 2.0, "b": 3.0}},
+            {
+                "path": "/api/v1/agents/llm_compare",
+                "params": {"prompt": "Test"},
+            },
         ]
     }
 
     resp = client.post("/api/v1/dev/chain", json=payload, headers=HEADERS)
+    # Force fail to see the response object
+    # assert False, resp.json()
     assert resp.status_code == 200
 
     results = resp.json()["results"]

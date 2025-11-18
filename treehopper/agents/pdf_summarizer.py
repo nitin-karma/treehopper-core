@@ -8,7 +8,6 @@ from treehopper.treehopper_llm import call_llm
     "/api/v1/agents/pdf/summarize",
     method="POST",
     goal="Summarize uploaded PDF using LLM",
-    tags=["Example Agents"],
 )
 async def pdf_summarize(
     file_path: str, provider: str = "openai", api_key: Optional[str] = None

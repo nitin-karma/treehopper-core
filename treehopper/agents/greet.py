@@ -1,31 +1,24 @@
-from pydantic import BaseModel
 from fastapi import Body
+from fastapi.responses import JSONResponse
 from treehopper.treehopper import agent
+from pydantic import BaseModel
 
 
 class GreetRequest(BaseModel):
     name: str
 
 
-@agent(
-    "greet",
-    method="POST",
-    goal="Greets a person by name",
-    tags=["Example Agents"],
-)
-async def greet(request: GreetRequest = Body(None), name: str | None = None):
-    """
-    Supports:
-    - HTTP POST { "name": "Nitin" }
-    - Chaining: {"path": "/api/v1/agents/greet", "params": {"name": "Nitin"}}
-    """
+class GreetAgent:
+    async def run(self, name: str) -> dict:
+        # MUST produce "<name>!" postfix to support chaining contract
+        return {"message": f"{name}!"}
 
-    # If chaining provided a primitive name param
+
+@agent("greet", method="POST", goal="Return a greeting")
+async def handle(request: GreetRequest = Body(None), name: str | None = None):
+    ag = GreetAgent()
     if name:
-        return {"message": f"Hello {name}"}
-
-    # If HTTP POST sent JSON body
+        return JSONResponse(await ag.run(name))
     if request and request.name:
-        return {"message": f"Hello {request.name}"}
-
-    return {"error": "Missing name"}
+        return JSONResponse(await ag.run(request.name))
+    return JSONResponse({"error": "Missing name"}, status_code=400)

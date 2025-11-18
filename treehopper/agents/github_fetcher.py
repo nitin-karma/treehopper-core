@@ -2,12 +2,7 @@ import httpx
 from treehopper.treehopper import agent
 
 
-@agent(
-    "/api/v1/agents/github",
-    method="GET",
-    goal="Fetch GitHub repo metadata",
-    tags=["Example Agents"],
-)
+@agent("/api/v1/agents/github", method="GET", goal="Fetch GitHub repo metadata")
 async def github(repo: str):
     try:
         async with httpx.AsyncClient() as client:

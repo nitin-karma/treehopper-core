@@ -3,7 +3,11 @@ import sys
 import pytest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-os.environ["TREEHOPPER_AUTODISCOVERY"] = "0"
+# os.environ["TREEHOPPER_AUTODISCOVERY"] = "0"
+
+
+# Ensure test mode is ON before any tests import treehopper
+os.environ.setdefault("TH_TEST_MODE", "1")
 
 
 @pytest.fixture(autouse=True)
