@@ -150,6 +150,16 @@ treehopper/
 └── dashboard/                 # Optional React developer UI
 ```
 
+### <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> ./clean.sh Shell Script
+```
+To Cleanup -
+- Cleaning treehopper memory
+- Python caches
+- Kill running uvicorn server
+- Remove installed agents (keep subscription id)
+
+```
+
 ### <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> License
 ```
 Treehopper is available under the MIT License.
