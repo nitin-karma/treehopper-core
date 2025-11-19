@@ -36,4 +36,4 @@ build/
 .pre-commit-config.yaml
 
 #shell script
-.scripts/
+scripts

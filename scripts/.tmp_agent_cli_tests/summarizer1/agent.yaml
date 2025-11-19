@@ -1,6 +1,0 @@
-agent_name: summarizer1
-agent_id: summarizer1-299e30c2
-subscription_id: a75110fc-0cec-45fc-8ca7-edfe63744497
-entrypoint: /summarizer1
-chain_ids: []
-description: summarizer1 agent
