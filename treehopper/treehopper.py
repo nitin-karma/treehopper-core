@@ -54,7 +54,7 @@ api_key_header = APIKeyHeader(name="x-api-key", auto_error=False)
 HOME = Path.home()
 TH_ROOT = HOME / ".treehopper"
 REGISTRY_AGENTS = TH_ROOT / "registry" / "agents"
-
+VERSION = "0.1.0"
 # -------------------------------------------------------
 # FASTAPI ROOT
 # -------------------------------------------------------
@@ -188,6 +188,8 @@ async def auth_middleware(request: Request, call_next):
         "/favicon.ico",
         "/docs",
         "/openapi.json",
+        "/health",
+        "/version",
         "/api/v1/sys/health",
         "/api/v1/sys/version",
     }
@@ -206,14 +208,17 @@ async def auth_middleware(request: Request, call_next):
 # -------------------------------------------------------
 # SYSTEM ENDPOINTS
 # -------------------------------------------------------
+@app.get("/", include_in_schema=False)
+@app.get("/health", include_in_schema=False)
 @router_sys.get("/health")
 async def health():
     return {"status": "ok"}
 
 
+@app.get("/version", include_in_schema=False)
 @router_sys.get("/version")
 async def version():
-    return {"treehopper": "0.1.0"}
+    return {"treehopper": f"v{VERSION}"}
 
 
 # -------------------------------------------------------

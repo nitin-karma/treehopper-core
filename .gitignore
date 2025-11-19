@@ -34,3 +34,6 @@ build/
 
 #precomit yaml
 .pre-commit-config.yaml
+
+#shell script
+name_check.sh
