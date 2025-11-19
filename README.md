@@ -10,7 +10,7 @@
 <br/>
 
 <p align="left">
-  <img src="https://img.shields.io/badge/python-3.9+-blue" />
+  <img src="https://img.shields.io/badge/python-3.10+-blue" />
   <img src="https://img.shields.io/badge/FastAPI-✔-green" />
   <img src="https://img.shields.io/badge/ChromaDB-Memory-orange" />
   <img src="https://img.shields.io/badge/LLM%20Providers-OpenAI%20%7C%20Gemini%20%7C%20Perplexity-purple" />
