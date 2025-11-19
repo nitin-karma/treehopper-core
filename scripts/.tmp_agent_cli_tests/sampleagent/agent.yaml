@@ -1,0 +1,6 @@
+agent_name: sampleagent
+agent_id: sampleagent-1cc5d470
+subscription_id: a75110fc-0cec-45fc-8ca7-edfe63744497
+entrypoint: /sampleagent
+chain_ids: []
+description: sampleagent agent

@@ -1,0 +1,6 @@
+agent_name: namewithleading
+agent_id: namewithleading-fc1001ff
+subscription_id: a75110fc-0cec-45fc-8ca7-edfe63744497
+entrypoint: /namewithleading
+chain_ids: []
+description: namewithleading agent

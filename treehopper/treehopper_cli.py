@@ -107,6 +107,7 @@ def save_agents_index(index: list[dict]) -> None:
 def validate_agent_name(name: str) -> str:
     # strip accidental quotes / whitespace
     clean = name.strip()
+
     if " " in clean:
         raise ValueError("Agent name cannot contain spaces")
     if not re.match(r"^[a-zA-Z][a-zA-Z0-9_]{3,24}$", clean):

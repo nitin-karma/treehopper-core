@@ -1,0 +1,6 @@
+agent_name: llmcompare
+agent_id: llmcompare-b6592ac4
+subscription_id: a75110fc-0cec-45fc-8ca7-edfe63744497
+entrypoint: /llmcompare
+chain_ids: []
+description: llmcompare agent
