@@ -34,3 +34,4 @@ build/
 
 #precomit yaml
 .pre-commit-config.yaml
+tests/chipset_report.txt

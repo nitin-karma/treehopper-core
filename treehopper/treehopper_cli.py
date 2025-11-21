@@ -123,16 +123,53 @@ def validate_agent_name(name: str) -> str:
 # ---------------------------------------------------------------------
 # SERVER HELPERS
 # ---------------------------------------------------------------------
-def run(th_port: int = int(os.getenv("TH_PORT", 1560))) -> None:
-    is_test = bool(os.getenv("PYTEST_CURRENT_TEST") or os.getenv("TH_TEST_MODE"))
+def run(
+    th_port: int = int(os.getenv("TH_PORT", 1560)), background: bool = False
+) -> None:
     ensure_runtime_dir()
-    # write PID *before* starting uvicorn (so caller can stop it later)
+    LOG_FILE = RUNTIME_DIR / "server.log"
+
+    # rotate if >1 MB
+    if LOG_FILE.exists() and LOG_FILE.stat().st_size > 1_000_000:
+        LOG_FILE.unlink(missing_ok=True)
+
+    # overwrite log each run
+    LOG_FILE.write_text("")
+
+    if background:
+        print(f"🚀 Starting Treehopper in background on port {th_port}")
+        env = os.environ.copy()
+        env["PROD"] = "1"
+
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",  # <<< FIX
+                "treehopper.treehopper:app",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                str(th_port),
+            ],
+            stdout=open(LOG_FILE, "w"),
+            stderr=subprocess.STDOUT,
+            env=env,
+        )
+
+        write_pid(MAIN_PID_FILE, proc.pid)
+        print(f"sys-executable path - {sys.executable}")
+        print(f"📌 PID: {proc.pid}")
+        print(f"📝 Logs: {LOG_FILE}")
+        return
+
+    # foreground mode
     write_pid(MAIN_PID_FILE, os.getpid())
     uvicorn.run(
         "treehopper.treehopper:app",
         host="0.0.0.0",
         port=th_port,
-        reload=not (PROD or is_test),
+        reload=not (PROD or bool(os.getenv("PYTEST_CURRENT_TEST"))),
     )
 
 
@@ -159,7 +196,7 @@ def restart(th_port: int = 1560) -> None:
     # 3️⃣ Start server
     env = os.environ.copy()
     env["PROD"] = "1"
-    subprocess.Popen(["treehopper", "run"], env=env)
+    subprocess.Popen(["treehopper", "run", "--bg"], env=env)
 
     # 4️⃣ Wait for server to pass health check
     for _ in range(40):
@@ -288,15 +325,14 @@ def agent_name_exists(agent_name: str) -> bool:
 
 def init_agent(agent_name: str) -> None:
     agent_name = validate_agent_name(agent_name)
+
     if agent_name_exists(agent_name):
         print(f"❌ Agent '{agent_name}' already exists")
         sys.exit(1)
+
     target_dir = Path.cwd() / agent_name
     if target_dir.exists():
         print(f"❌ Directory '{agent_name}' already exists here.")
-        sys.exit(1)
-    if agent_name_exists(agent_name):
-        print(f"❌ Agent '{agent_name}' already exists. Choose another name.")
         sys.exit(1)
 
     ensure_registry_dirs()
@@ -305,6 +341,9 @@ def init_agent(agent_name: str) -> None:
 
     target_dir.mkdir(parents=True, exist_ok=False)
 
+    # ------------------------------------------------
+    # Modern YAML including input + output schema
+    # ------------------------------------------------
     (target_dir / "agent.yaml").write_text(
         yaml.safe_dump(
             {
@@ -312,14 +351,20 @@ def init_agent(agent_name: str) -> None:
                 "agent_id": agent_id,
                 "subscription_id": subscription_id,
                 "entrypoint": f"/{agent_name}",
-                "chain_ids": [],
                 "description": f"{agent_name} agent",
+                "inputs": [{"name": "name", "type": "string"}],  # default template
+                "outputs": [{"name": "message", "type": "string"}],  # default template
+                "tags": [],
+                "version": "1.0",
             },
             sort_keys=False,
         ),
         encoding="utf-8",
     )
 
+    # ------------------------------------------------
+    # Schema – JSON ONLY, no query parameters
+    # ------------------------------------------------
     (target_dir / "schema.py").write_text(
         f"""from pydantic import BaseModel
 
@@ -329,7 +374,9 @@ class {agent_name.capitalize()}Request(BaseModel):
         encoding="utf-8",
     )
 
-    # 🔥 FINAL — primitive signature for compatibility with chain + Swagger JSON body
+    # ------------------------------------------------
+    # Handler – POST only, clean JSON body pattern
+    # ------------------------------------------------
     (target_dir / "handler.py").write_text(
         f"""from fastapi import Body
 from fastapi.responses import JSONResponse
@@ -337,19 +384,13 @@ from treehopper.treehopper import agent
 from .schema import {agent_name.capitalize()}Request
 
 class {agent_name.capitalize()}Agent:
-    async def run(self, name: str, short: bool = False) -> dict:
-        if short:
-            return {{"message": f"{{name}}!"}}
+    async def run(self, name: str) -> dict:
         return {{"message": f"Hello {{name}} from {agent_name} agent!"}}
 
 @agent("{agent_name}", method="POST", goal="Example agent created via `treehopper init`")
-async def handle(request: {agent_name.capitalize()}Request = Body(None), name: str | None = None, short: bool = False):
+async def handle(payload: {agent_name.capitalize()}Request = Body(...)):
     ag = {agent_name.capitalize()}Agent()
-    if name:
-        return JSONResponse(await ag.run(name, short))
-    if request and request.name:
-        return JSONResponse(await ag.run(request.name, short))
-    return JSONResponse({{"error": "Missing name"}}, status_code=400)
+    return JSONResponse(await ag.run(payload.name))
 """,
         encoding="utf-8",
     )
@@ -391,17 +432,33 @@ def lint_agent(agent_ref: str) -> None:
 
     tree = ast.parse(handler_path.read_text())
 
+    found = False
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == "handle":
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "handle"
+        ):
+            found = True
+
+            # must accept exactly one parameter: payload
             params = [p.arg for p in node.args.args]
-            if "request" in params:
-                print("❌ Remove `request:` param. Use primitive args (name: str).")
-                sys.exit(1)
-            if "name" not in params:
-                print("❌ Handler must accept: name: str")
+            if params != ["payload"]:
+                print(
+                    "❌ Handler must accept exactly one argument: payload: SchemaClass = Body(...)"
+                )
                 sys.exit(1)
 
-    print(f"✅ Lint passed for {agent_ref}")
+            # must contain Body(...) annotation
+            ann = node.args.args[0].annotation
+            if not ann:
+                print("❌ payload must be typed with Schema")
+                sys.exit(1)
+
+    if not found:
+        print("❌ No handler() function found")
+        sys.exit(1)
+
+    print(f"🟢 Lint passed for {agent_ref}")
 
 
 def build_agent(agent_ref: str) -> None:
@@ -412,16 +469,23 @@ def build_agent(agent_ref: str) -> None:
 
     cfg = validate_agent_yaml(agent_dir)
     agent_name = validate_agent_name(cfg["agent_name"])
-    agent_name = cfg["agent_name"]
     agent_id = cfg["agent_id"]
     entrypoint = cfg["entrypoint"]
 
+    # 🚨 enforce schema fields
+    inputs = cfg.get("inputs")
+    outputs = cfg.get("outputs")
+    if not isinstance(inputs, list) or not isinstance(outputs, list):
+        print("❌ agent.yaml must include 'inputs' and 'outputs' list fields")
+        sys.exit(1)
+
     ensure_registry_dirs()
     index = load_agents_index()
+
     # 🚫 Prevent duplicate agent names
     for agent in index:
         if agent["agent_name"] == agent_name and agent["agent_id"] != agent_id:
-            print(f"❌ Agent name '{agent_name}' already exists — choose another name")
+            print(f"❌ Agent name '{agent_name}' already exists")
             sys.exit(1)
 
     target_dir = REGISTRY_AGENTS / agent_id
@@ -429,6 +493,7 @@ def build_agent(agent_ref: str) -> None:
         shutil.rmtree(target_dir)
     shutil.copytree(agent_dir, target_dir)
 
+    # Store full metadata (including schema)
     index = [a for a in index if a["agent_id"] != agent_id]
     index.append(
         {
@@ -439,13 +504,16 @@ def build_agent(agent_ref: str) -> None:
                 "by_name": f"/api/v1/agents/{agent_name}",
                 "by_id": f"/api/v1/agents/{agent_id}",
             },
+            "inputs": inputs,
+            "outputs": outputs,
         }
     )
     save_agents_index(index)
 
     print(f"✅ Built agent '{agent_name}' → {target_dir}")
-    print("📌 Call via:")
-    print(f'  treehopper call /api/v1/agents/{agent_name} \'{{"name": "Nitin"}}\'')
+    print("📌 Call example:")
+    ex_key = inputs[0]["name"]
+    print(f'  treehopper call /api/v1/agents/{agent_name} \'{{"{ex_key}": "sample"}}\'')
 
 
 # ---------------------------------------------------------------------
@@ -565,6 +633,7 @@ def print_help():
 Treehopper CLI Commands
 ────────────────────────────────────────────
   treehopper run                         Start the main server
+  treehopper run --bg                    Start the main server in background
   treehopper stop                        Stop the main server
   treehopper restart                     Restart main server
   treehopper list                        List installed agents
@@ -575,8 +644,7 @@ Treehopper CLI Commands
   treehopper agent info <ref>            Show metadata
   treehopper status                     Show if the main server is running
   treehopper agent delete <ref>         Delete installed agent safely
-  treehopper chain <a> <b> ...           Chain agents (server API)
-  treehopper chain stop                  Stop chain runtimes (future)
+  treehopper chain                      To view all Chain related commands
 """
     )
 
@@ -594,7 +662,8 @@ def main() -> None:
     if cmd == "help":
         print_help()
     elif cmd == "run":
-        run()
+        bg = "--bg" in sys.argv
+        run(background=bg)
     elif cmd == "stop":
         stop()
     elif cmd == "restart":
@@ -618,7 +687,9 @@ def main() -> None:
     elif cmd == "chain" and len(sys.argv) > 2 and sys.argv[2] == "stop":
         stop_chain()
     elif cmd == "chain":
-        run_chain_from_cli(sys.argv[2:])
+        from .treehopper_chains import chain_entry
+
+        chain_entry(sys.argv[2:])
     elif cmd == "status":
         status()
     elif cmd == "agent" and sys.argv[2] == "delete":
