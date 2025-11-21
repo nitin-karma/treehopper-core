@@ -720,6 +720,7 @@ Treehopper CLI Commands
   treehopper agent delete <ref>                    Delete installed agent safely
   treehopper chain                                 To view all Chain related commands
   treehopper push-file <agent-name> <file_path>    To push the input file to agent for any file operations
+  treehopper clean                                 Be Careful - To cleanup the servers, pids, agents, chain
 """
     )
 
@@ -774,6 +775,10 @@ def main() -> None:
             print("Usage: treehopper push-file <agent_name> <path>")
             sys.exit(1)
         push_file(sys.argv[2], sys.argv[3])
+    elif cmd == "clean":
+        from treehopper_cleaner import main as clean_main
+
+        clean_main()
     else:
         print(f"Unknown command: {cmd}")
         print_help()
