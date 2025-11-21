@@ -8,7 +8,7 @@ import time
 import uuid
 from pathlib import Path
 import ast
-
+from typing import List
 import requests
 import uvicorn
 import yaml
@@ -380,9 +380,10 @@ class {agent_name.capitalize()}Request(BaseModel):
     (target_dir / "handler.py").write_text(
         f"""from fastapi import Body
 from fastapi.responses import JSONResponse
-from treehopper.treehopper import agent
+from treehopper.treehopper import agent, get_agent_id
 from .schema import {agent_name.capitalize()}Request
-
+agent_name = '{agent_name}'
+agent_id = get_agent_id(agent_name)
 class {agent_name.capitalize()}Agent:
     async def run(self, name: str) -> dict:
         return {{"message": f"Hello {{name}} from {agent_name} agent!"}}
@@ -422,6 +423,7 @@ def validate_agent_yaml(agent_dir: Path) -> dict:
 
 def lint_agent(agent_ref: str) -> None:
     agent_dir = Path.cwd() / agent_ref
+
     cfg = validate_agent_yaml(agent_dir)
     validate_agent_name(cfg["agent_name"])
 
@@ -440,22 +442,63 @@ def lint_agent(agent_ref: str) -> None:
         ):
             found = True
 
-            # must accept exactly one parameter: payload
-            params = [p.arg for p in node.args.args]
-            if params != ["payload"]:
+            # Extract parameter names
+            params: List[ast.arg] = node.args.args
+            param_names = [p.arg for p in params]
+
+            valid_params = set(["file", "payload"])
+
+            # 1. Check for unexpected parameters
+            if not set(param_names).issubset(valid_params):
                 print(
-                    "❌ Handler must accept exactly one argument: payload: SchemaClass = Body(...)"
+                    f"❌ Handler signature contains invalid parameters: \
+                        {set(param_names) - valid_params}. Only 'file' and 'payload' are allowed."
                 )
                 sys.exit(1)
 
-            # must contain Body(...) annotation
-            ann = node.args.args[0].annotation
-            if not ann:
-                print("❌ payload must be typed with Schema")
+            # 2. Check for empty signature (must have at least one)
+            if not param_names:
+                print(
+                    "❌ Handler must accept at least one argument: 'file' or 'payload'."
+                )
                 sys.exit(1)
 
+            # --- Annotation Validation Logic ---
+
+            # Check 'file' parameter if present
+            if "file" in param_names:
+                file_param = next((p for p in params if p.arg == "file"), None)
+                # We need to ensure it has some type annotation (e.g., UploadFile = File(...))
+                if not file_param or not file_param.annotation:
+                    print(
+                        "❌ The 'file' parameter must be present and typed (e.g., file: UploadFile = File(None))."
+                    )
+                    sys.exit(1)
+
+            # Check 'payload' parameter if present
+            if "payload" in param_names:
+                payload_param = next((p for p in params if p.arg == "payload"), None)
+                # We need to ensure it has some type annotation (e.g., payload: Schema = Form(...))
+                if not payload_param or not payload_param.annotation:
+                    print(
+                        "❌ The 'payload' parameter must be present and typed with\
+                             a Schema and Form/Body (e.g., payload: Schema = Form())."
+                    )
+                    sys.exit(1)
+
+            # Additional Check: If 'file' is absent, 'payload' must be present for a functional API
+            if "file" not in param_names and "payload" not in param_names:
+                # This should be caught by the empty signature check, but redundant for safety
+                print(
+                    "❌ Handler must accept at least one argument: 'file' or 'payload'."
+                )
+                sys.exit(1)
+
+            # We assume successful validation if we reached here
+            break
+
     if not found:
-        print("❌ No handler() function found")
+        print("❌ No handle() function found")
         sys.exit(1)
 
     print(f"🟢 Lint passed for {agent_ref}")
@@ -514,6 +557,37 @@ def build_agent(agent_ref: str) -> None:
     print("📌 Call example:")
     ex_key = inputs[0]["name"]
     print(f'  treehopper call /api/v1/agents/{agent_name} \'{{"{ex_key}": "sample"}}\'')
+
+
+def push_file(agent_name: str, src_path: str) -> None:
+    """Copy a file into persistent shared storage for the agent."""
+    ensure_registry_dirs()
+    index = load_agents_index()
+
+    match = next((a for a in index if a["agent_name"] == agent_name), None)
+    if not match:
+        print(f"❌ No agent found named '{agent_name}'. Did you build it first?")
+        sys.exit(1)
+
+    agent_id = match["agent_id"]
+    dest_dir = REGISTRY_DIR / "shared" / agent_id / "files"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    src = Path(src_path)
+    if not src.exists() or not src.is_file():
+        print(f"❌ File not found: {src_path}")
+        sys.exit(1)
+
+    dst = dest_dir / src.name
+    shutil.copy2(src, dst)
+
+    # canonical path to be sent to formatter handler
+    relative_path = f"shared/{agent_id}/files/{src.name}"
+
+    print(f"📁 File stored persistently → {dst}")
+    print("🔑 Use in payload:")
+    print(f'    {{"file_path": "{relative_path}"}}')
+    print("💡 This survives agent rebuilds.")
 
 
 # ---------------------------------------------------------------------
@@ -632,19 +706,20 @@ def print_help():
         """
 Treehopper CLI Commands
 ────────────────────────────────────────────
-  treehopper run                         Start the main server
-  treehopper run --bg                    Start the main server in background
-  treehopper stop                        Stop the main server
-  treehopper restart                     Restart main server
-  treehopper list                        List installed agents
-  treehopper call <path> '<json>'        Call an agent
-  treehopper init <agent_name>           Create agent scaffold template
-  treehopper lint <agent_folder>         Validate handler.py + YAML
-  treehopper build <agent_folder>        Install agent to registry
-  treehopper agent info <ref>            Show metadata
-  treehopper status                     Show if the main server is running
-  treehopper agent delete <ref>         Delete installed agent safely
-  treehopper chain                      To view all Chain related commands
+  treehopper run                                   Start the main server
+  treehopper run --bg                              Start the main server in background
+  treehopper stop                                  Stop the main server
+  treehopper restart                               Restart main server
+  treehopper list                                  List installed agents
+  treehopper call <path> '<json>'                  Call an agent
+  treehopper init <agent_name>                     Create agent scaffold template
+  treehopper lint <agent_folder>                   Validate handler.py + YAML
+  treehopper build <agent_folder>                  Install agent to registry
+  treehopper agent info <ref>                      Show metadata
+  treehopper status                                Show if the main server is running
+  treehopper agent delete <ref>                    Delete installed agent safely
+  treehopper chain                                 To view all Chain related commands
+  treehopper push-file <agent-name> <file_path>    To push the input file to agent for any file operations
 """
     )
 
@@ -694,6 +769,11 @@ def main() -> None:
         status()
     elif cmd == "agent" and sys.argv[2] == "delete":
         delete_agent(sys.argv[3])
+    elif cmd == "push-file":
+        if len(sys.argv) != 4:
+            print("Usage: treehopper push-file <agent_name> <path>")
+            sys.exit(1)
+        push_file(sys.argv[2], sys.argv[3])
     else:
         print(f"Unknown command: {cmd}")
         print_help()

@@ -54,6 +54,8 @@ api_key_header = APIKeyHeader(name="x-api-key", auto_error=False)
 HOME = Path.home()
 TH_ROOT = HOME / ".treehopper"
 REGISTRY_AGENTS = TH_ROOT / "registry" / "agents"
+REGISTRY_DIR = TH_ROOT / "registry"
+REGISTRY_AGENTS_INDEX = REGISTRY_DIR / "agents.json"
 VERSION = "0.1.0"
 # -------------------------------------------------------
 # FASTAPI ROOT
@@ -325,6 +327,28 @@ def ensure_pkg(name: str, path: Path | None = None):
     if path:
         pkg.__path__ = [str(path)]  # type: ignore[attr-defined]
     sys.modules[name] = pkg
+
+
+def get_agent_id(agent_name: str) -> str | None:
+    """
+    Returns agent_id for a given agent_name (case-insensitive).
+    If not found, returns None.
+    """
+    agent_name = agent_name.lower().strip()
+
+    if not REGISTRY_AGENTS_INDEX.exists():
+        return None
+
+    try:
+        agents = json.loads(REGISTRY_AGENTS_INDEX.read_text())
+    except Exception:
+        return None
+
+    for agent in agents:
+        if agent.get("agent_name", "").lower() == agent_name:
+            return agent.get("agent_id")
+
+    return None
 
 
 def discover_agents():
