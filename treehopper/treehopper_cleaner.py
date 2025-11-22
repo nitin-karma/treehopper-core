@@ -3,7 +3,7 @@ import sys
 import subprocess
 from pathlib import Path
 
-SCRIPT_NAME = "th_clean.sh"
+SCRIPT_NAME = "scripts/th_clean.sh"
 
 
 def find_script() -> Path | None:
