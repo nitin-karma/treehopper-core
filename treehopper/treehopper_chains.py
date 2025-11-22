@@ -14,6 +14,12 @@ from typing import Any, Dict, List, Optional
 import requests
 import yaml
 
+from treehopper.utils.shared_files import (
+    has_only_one_shared_file,
+    get_the_only_shared_file,
+)
+
+
 # -----------------------------------------------------------------------------
 # CONSTANTS & PATHS
 # -----------------------------------------------------------------------------
@@ -259,7 +265,7 @@ def chain_build(chain_name: str, agent_names: List[str]) -> None:
         steps.append(
             {
                 "agent_name": agent_name,
-                "path": meta["routes"]["by_name"],  # e.g. /api/v1/agents/summarizer
+                "path": meta["routes"]["by_name"],  # /api/v1/agents/<name>
                 "inputs": meta.get("inputs", []),
                 "outputs": meta.get("outputs", []),
             }
@@ -269,13 +275,13 @@ def chain_build(chain_name: str, agent_names: List[str]) -> None:
     chain_dir = CHAINS_DIR / chain_id
     chain_dir.mkdir(parents=True, exist_ok=False)
 
-    chain_ep = f"/api/v1/chains/{cname}"
+    endpoint = f"/api/v1/chains/{cname}"
 
     cfg = {
         "chain_name": cname,
-        "chain_ep": chain_ep,
-        "chain_ep_type": "POST",
         "chain_id": chain_id,
+        "endpoint": endpoint,
+        "method": "POST",
         "agents": steps,
         "created_at": datetime.utcnow().isoformat() + "Z",
         "description": f"Chain '{cname}' with {len(steps)} agents.",
@@ -289,16 +295,18 @@ def chain_build(chain_name: str, agent_names: List[str]) -> None:
     save_chains_index(chains_index)
 
     print(f"✅ Created chain '{cname}' ({chain_id})")
-    print(f"📌 Endpoint: {chain_ep} [POST]")
+    print(f"📌 Endpoint: {endpoint} [POST]")
     print("📌 Agents in sequence:")
     for i, s in enumerate(steps):
         print(f"  {i+1}. {s['agent_name']}  →  {s['path']}")
 
-    print("\n▶ Example run (non-detached):")
+    print("\n▶ Example run via CLI (non-detached):")
     print(f'  treehopper chain run {cname} --payload \'{{"doc_text": "..."}}\'')
-
-    print("▶ Example run (detached chain runtime):")
-    print(f"  treehopper chain run {cname} --detached")
+    print("▶ Example run via HTTP:")
+    print(
+        f"  curl -X POST http://localhost:{MAIN_PORT}{endpoint} -H 'x-api-key: demo-key-123' \
+             -H 'Content-Type: application/json' -d '{{\"doc_text\": \"...\"}}'"
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -344,14 +352,27 @@ def parse_payload_args(args: List[str]) -> Dict[str, Any]:
 
 def chain_run_local(chain_ref: ChainRef, payload: Dict[str, Any]) -> None:
     """
-    Runs the chain against the MAIN Treehopper server by POSTing
-    directly to /api/v1/chains/<chain_name>.
+    Execute the chain via the main Treehopper server's
+    /api/v1/chains/{name} endpoint.
     """
     ensure_main_server()
     cfg = load_chain_cfg(chain_ref)
+    endpoint = cfg.get("endpoint") or f"/api/v1/chains/{chain_ref.chain_name}"
 
-    chain_ep = cfg.get("chain_ep") or f"/api/v1/chains/{chain_ref.chain_name}"
-    url = f"{BASE_URL}{chain_ep}"
+    url = f"{BASE_URL}{endpoint}"
+
+    # --- Auto file_path injection for first agent if payload is empty ---
+    cfg = load_chain_cfg(chain_ref)
+    first_agent = cfg.get("agents", [])[0] if cfg.get("agents") else None
+    if first_agent:
+        first_agent_name = first_agent.get("agent_name", "")
+        first_agent_id = first_agent.get("agent_id", "")
+        if payload == {} and has_only_one_shared_file(first_agent_id):
+            auto_path = get_the_only_shared_file(first_agent_id)
+            print(
+                f"🔌 Auto-injecting payload for '{first_agent_name}': file_path='{auto_path}'"
+            )
+            payload = {"file_path": auto_path}
 
     print(f"▶ Executing chain '{chain_ref.chain_name}' via {url}")
     r = requests.post(url, json=payload or {}, headers=API_KEY)
@@ -359,22 +380,27 @@ def chain_run_local(chain_ref: ChainRef, payload: Dict[str, Any]) -> None:
     try:
         data = r.json()
     except Exception:
+        print(f"HTTP {r.status_code}")
         print(r.text)
         return
 
-    status = "✓" if r.status_code == 200 and data.get("success", True) else "✗"
-    print(f"HTTP {r.status_code}   overall: {status}")
+    if r.status_code != 200:
+        print(f"HTTP {r.status_code}")
+        print(data)
+        return
 
     results = data.get("results", [])
     agents = cfg.get("agents", [])
+
     print("📊 Chain step results:")
     for i, res in enumerate(results):
         name = agents[i]["agent_name"] if i < len(agents) else f"step_{i}"
-        step_status = "✓ success"
+        status = "✓ success"
         if isinstance(res, dict) and "error" in res:
-            step_status = f"✗ error: {res['error']}"
-        print(f"  [{name}] {step_status}")
+            status = f"✗ error: {res['error']}"
+        print(f"  [{name}] {status}")
 
+    # last_run.json is written by server; just show path
     history_path = chain_ref.dir_path / "last_run.json"
     if history_path.exists():
         print("\n🔍 Full response stored at:")
@@ -386,14 +412,14 @@ def chain_run_local(chain_ref: ChainRef, payload: Dict[str, Any]) -> None:
 def chain_run_detached(chain_ref: ChainRef, payload: Dict[str, Any]) -> None:
     """
     Start a dedicated uvicorn runtime for this chain on a predictable port,
-    then execute the chain once against that runtime's /api/v1/chains/<name>.
+    then execute the chain once via its /api/v1/chains/{name} endpoint.
     """
     cfg = load_chain_cfg(chain_ref)
     port = derive_chain_port(chain_ref.chain_id)
     chain_url = f"http://localhost:{port}"
     pid_file = RUNTIME_DIR / f"{CHAIN_PID_PREFIX}{chain_ref.chain_id}.pid"
 
-    # if already running, don't start again
+    # If already running, reuse
     existing_pid = read_pid(pid_file)
     if existing_pid:
         try:
@@ -438,27 +464,39 @@ def chain_run_detached(chain_ref: ChainRef, payload: Dict[str, Any]) -> None:
         else:
             print("⚠️ Chain runtime did not report healthy; continuing anyway.")
 
-    # Now call the chain endpoint on that runtime
-    chain_ep = cfg.get("chain_ep") or f"/api/v1/chains/{chain_ref.chain_name}"
-    url = f"{chain_url}{chain_ep}"
+    endpoint = cfg.get("endpoint") or f"/api/v1/chains/{chain_ref.chain_name}"
+    url = f"{chain_url}{endpoint}"
+
+    # ⬇ INSERT PATCH HERE
+    first_agent = cfg.get("agents", [])[0] if cfg.get("agents") else None
+    if first_agent:
+        first_agent_id = first_agent.get("agent_id", "")
+        if payload == {} and has_only_one_shared_file(first_agent_id):
+            auto_path = get_the_only_shared_file(first_agent_id)
+            print(f"🔌 Auto-injecting payload: file_path='{auto_path}'")
+            payload = {"file_path": auto_path}
+    # ⬆ PATCH END
 
     print(f"▶ Executing chain via {url}")
     r = requests.post(url, json=payload or {}, headers=API_KEY)
+
     try:
         data = r.json()
     except Exception:
+        print(f"HTTP {r.status_code}")
         print(r.text)
         return
 
     results = data.get("results", [])
     agents = cfg.get("agents", [])
+
     print("📊 Chain step results:")
     for i, res in enumerate(results):
         name = agents[i]["agent_name"] if i < len(agents) else f"step_{i}"
-        step_status = "✓ success"
+        status = "✓ success"
         if isinstance(res, dict) and "error" in res:
-            step_status = f"✗ error: {res['error']}"
-        print(f"  [{name}] {step_status}")
+            status = f"✗ error: {res['error']}"
+        print(f"  [{name}] {status}")
 
     history_path = chain_ref.dir_path / "last_run.json"
     if history_path.exists():
@@ -586,9 +624,8 @@ Treehopper Chain Commands
       and a POST endpoint /api/v1/chains/<name>.
 
   treehopper chain run <name|id> [--payload '{...}'] [--payload-file path] [--detached]
-      Execute a named chain immediately by calling its endpoint
-      /api/v1/chains/<name>. If --detached is used, a dedicated
-      Treehopper runtime is started on a separate port.
+      Execute a named chain via /api/v1/chains/{name}.
+      Payload (if provided) is passed only to the first agent.
 
   treehopper chain stop <name|id>
       Stop a dedicated chain runtime if running.

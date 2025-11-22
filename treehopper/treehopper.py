@@ -7,7 +7,7 @@ from types import ModuleType
 import inspect
 import json
 
-from fastapi import FastAPI, Request, APIRouter, Depends, HTTPException, Body
+from fastapi import FastAPI, Request, APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -245,35 +245,82 @@ async def list_agents():
 
 
 @router_dev.get("/chains")
-async def list_chains_dev():
+async def list_chains():
     """
-    Return metadata for all registered chains based on chain.yaml files.
+    Dev: list registered chains from ~/.treehopper/registry/chains.
     """
-    chains = []
+    results: list[dict] = []
     if CHAINS_DIR.is_dir():
-        for chain_dir in CHAINS_DIR.iterdir():
-            if not chain_dir.is_dir():
-                continue
-            cfg_path = chain_dir / "chain.yaml"
+        for folder in CHAINS_DIR.iterdir():
+            cfg_path = folder / "chain.yaml"
             if not cfg_path.exists():
                 continue
             try:
                 cfg = yaml.safe_load(cfg_path.read_text())
             except Exception:
                 continue
-
-            chains.append(
+            results.append(
                 {
                     "chain_name": cfg.get("chain_name"),
                     "chain_id": cfg.get("chain_id"),
-                    "endpoint": cfg.get(
-                        "chain_ep", f"/api/v1/chains/{cfg.get('chain_name')}"
-                    ),
+                    "endpoint": cfg.get("endpoint"),
                     "agents": [a.get("agent_name") for a in cfg.get("agents", [])],
                     "created_at": cfg.get("created_at"),
                 }
             )
-    return chains
+    return results
+
+
+@router_chains.post("/{chain_name}")
+async def run_chain_endpoint(chain_name: str, payload: dict | None = None):
+    cfg, chain_dir = resolve_chain_by_name(chain_name)
+    agents_cfg = cfg.get("agents", [])
+
+    if not agents_cfg:
+        raise HTTPException(
+            status_code=400, detail=f"Chain has no agents: {chain_name}"
+        )
+
+    results = []
+    prev_output = None
+    root_payload = payload or {}
+
+    for idx, step in enumerate(agents_cfg):
+        # Validate FIRST STEP required inputs exist
+        if idx == 0:
+            declared = [i.get("name") for i in step.get("inputs", []) if i.get("name")]
+            missing = [d for d in declared if d not in root_payload]
+            if missing:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Missing required input(s) for first step '{step.get('agent_name')}': {missing}",
+                )
+
+        # Build params for execution
+        if idx == 0:
+            params = root_payload
+        else:
+            params = {}
+            for inp in step.get("inputs", []):
+                k = inp.get("name")
+                if k and isinstance(prev_output, dict) and k in prev_output:
+                    params[k] = prev_output[k]
+
+        result = await _execute_agent_step(step["path"], params)
+        results.append(result)
+        prev_output = result
+
+    history = {
+        "chain_name": cfg.get("chain_name"),
+        "chain_id": cfg.get("chain_id"),
+        "executed_at": datetime.utcnow().isoformat() + "Z",
+        "results": results,
+    }
+    (chain_dir / "last_run.json").write_text(
+        json.dumps(history, indent=2), encoding="utf-8"
+    )
+
+    return history
 
 
 def _normalize_agent_path(path: str) -> str:
@@ -337,100 +384,150 @@ async def _run_agent_path(path: str, params: dict[str, Any]) -> Any:
     return result
 
 
-async def _run_chain_spec(
-    chain_cfg: dict[str, Any], initial_payload: dict[str, Any]
-) -> dict[str, Any]:
+# async def _run_chain_spec(
+#     chain_cfg: dict[str, Any], initial_payload: dict[str, Any]
+# ) -> dict[str, Any]:
+#     """
+#     Execute a named chain defined in chain.yaml.
+
+#     Semantics:
+#       - First agent: params come from initial_payload (filtered by its inputs if present)
+#       - Each subsequent agent: its inputs come from previous agent's output dict
+#         by matching input 'name' to keys in previous result.
+#     """
+#     agents_spec = chain_cfg.get("agents", [])
+#     all_results: list[Any] = []
+#     prev_output: dict[str, Any] | None = None
+
+#     for idx, step in enumerate(agents_spec):
+#         path = step["path"]
+#         inputs = step.get("inputs", [])
+
+#         # Build params for this step
+#         params: dict[str, Any] = {}
+
+#         if idx == 0:
+#             # First agent: map initial payload to its declared inputs
+#             if inputs:
+#                 for inp in inputs:
+#                     name = inp.get("name")
+#                     if name in initial_payload:
+#                         params[name] = initial_payload[name]
+#             else:
+#                 # If no inputs declared, pass full payload
+#                 params = dict(initial_payload)
+#         else:
+#             # Subsequent agents: map from previous output
+#             if prev_output is not None and isinstance(prev_output, dict):
+#                 if inputs:
+#                     for inp in inputs:
+#                         name = inp.get("name")
+#                         if name in prev_output:
+#                             params[name] = prev_output[name]
+#                 else:
+#                     # no explicit inputs → pass full previous output
+#                     params = dict(prev_output)
+
+#         try:
+#             result = await _run_agent_path(path, params)
+#         except HTTPException as e:
+#             # propagate but still include partial results
+#             all_results.append(
+#                 {"error": str(e.detail) if hasattr(e, "detail") else str(e)}
+#             )
+#             return {
+#                 "success": False,
+#                 "failed_step": idx,
+#                 "failed_agent": step.get("agent_name"),
+#                 "results": all_results,
+#             }
+#         except Exception as e:
+#             all_results.append({"error": str(e)})
+#             return {
+#                 "success": False,
+#                 "failed_step": idx,
+#                 "failed_agent": step.get("agent_name"),
+#                 "results": all_results,
+#             }
+
+#         all_results.append(result)
+
+#         # Prepare for next step
+#         if isinstance(result, dict):
+#             prev_output = result
+#         else:
+#             prev_output = {"result": result}
+
+#     return {
+#         "success": True,
+#         "results": all_results,
+#     }
+
+
+async def _execute_agent_step(path: str, params: dict) -> dict:
     """
-    Execute a named chain defined in chain.yaml.
+    Internal: run a single agent from the in-memory registry with
+    smart handling of Pydantic body params.
 
-    Semantics:
-      - First agent: params come from initial_payload (filtered by its inputs if present)
-      - Each subsequent agent: its inputs come from previous agent's output dict
-        by matching input 'name' to keys in previous result.
+    Returns a plain dict (JSONResponse unwrapped if needed).
     """
-    agents_spec = chain_cfg.get("agents", [])
-    all_results: list[Any] = []
-    prev_output: dict[str, Any] | None = None
+    # Normalize path: allow "/foo" or "/api/v1/agents/foo"
+    if path not in agents:
+        short = path.replace("/api/v1/agents", "")
+        full = f"/api/v1/agents{short}"
+        if full not in agents:
+            raise HTTPException(status_code=404, detail=f"Agent not found: {path}")
+        path = full
 
-    for idx, step in enumerate(agents_spec):
-        path = step["path"]
-        inputs = step.get("inputs", [])
+    func = agents[path]["func"]
+    sig = inspect.signature(func)
 
-        # Build params for this step
-        params: dict[str, Any] = {}
+    accepted: dict[str, Any] = {}
+    body_model_param = None
 
-        if idx == 0:
-            # First agent: map initial payload to its declared inputs
-            if inputs:
-                for inp in inputs:
-                    name = inp.get("name")
-                    if name in initial_payload:
-                        params[name] = initial_payload[name]
-            else:
-                # If no inputs declared, pass full payload
-                params = dict(initial_payload)
-        else:
-            # Subsequent agents: map from previous output
-            if prev_output is not None and isinstance(prev_output, dict):
-                if inputs:
-                    for inp in inputs:
-                        name = inp.get("name")
-                        if name in prev_output:
-                            params[name] = prev_output[name]
-                else:
-                    # no explicit inputs → pass full previous output
-                    params = dict(prev_output)
+    # Figure out primitive vs Pydantic body
+    for name, param in sig.parameters.items():
+        ann = param.annotation
 
+        # Pydantic model param (body)
+        if hasattr(ann, "__fields__"):
+            body_model_param = name
+            continue
+
+        # primitive / normal param
+        if name in params:
+            accepted[name] = params[name]
+
+    # build Pydantic body instance if needed
+    if body_model_param:
+        ann = sig.parameters[body_model_param].annotation
+        accepted[body_model_param] = ann(**params)
+
+    result = (
+        await func(**accepted)
+        if inspect.iscoroutinefunction(func)
+        else func(**accepted)
+    )
+
+    # unwrap JSONResponse if needed
+    if hasattr(result, "body"):
         try:
-            result = await _run_agent_path(path, params)
-        except HTTPException as e:
-            # propagate but still include partial results
-            all_results.append(
-                {"error": str(e.detail) if hasattr(e, "detail") else str(e)}
-            )
-            return {
-                "success": False,
-                "failed_step": idx,
-                "failed_agent": step.get("agent_name"),
-                "results": all_results,
-            }
-        except Exception as e:
-            all_results.append({"error": str(e)})
-            return {
-                "success": False,
-                "failed_step": idx,
-                "failed_agent": step.get("agent_name"),
-                "results": all_results,
-            }
+            result = json.loads(result.body.decode())
+        except Exception:
+            pass
 
-        all_results.append(result)
-
-        # Prepare for next step
-        if isinstance(result, dict):
-            prev_output = result
-        else:
-            prev_output = {"result": result}
-
-    return {
-        "success": True,
-        "results": all_results,
-    }
+    # ensure dict
+    if not isinstance(result, dict):
+        return {"value": result}
+    return result
 
 
 @router_dev.post("/chain")
 async def chain(body: ChainBody):
-    outputs = []
+    outputs: list[dict] = []
 
     for step in body.chain:
-        try:
-            result = await _run_agent_path(step.path, step.params)
-        except HTTPException:
-            # respect HTTP errors (e.g., 404 agent not found)
-            raise
-        except Exception as e:
-            # generic error as 500
-            raise HTTPException(status_code=500, detail=str(e))
-
+        result = await _execute_agent_step(step.path, step.params)
         outputs.append(result)
 
     return {"results": outputs}
@@ -492,6 +589,57 @@ def get_agent_id(agent_name: str) -> str | None:
     return None
 
 
+def load_chains_index() -> list[dict]:
+    if not CHAINS_INDEX.exists():
+        return []
+    try:
+        return json.loads(CHAINS_INDEX.read_text())
+    except Exception:
+        return []
+
+
+def resolve_chain_by_name(chain_name: str) -> tuple[dict, Path]:
+    """
+    Find a chain by name. Returns (cfg, chain_dir).
+    """
+    chain_name = chain_name.strip().lower()
+    # First: use index if present
+    index = load_chains_index()
+    chain_id = None
+    for c in index:
+        if c.get("chain_name", "").lower() == chain_name:
+            chain_id = c.get("chain_id")
+            break
+
+    # Fallback: scan chain folders
+    if not chain_id:
+        if CHAINS_DIR.is_dir():
+            for folder in CHAINS_DIR.iterdir():
+                cfg_path = folder / "chain.yaml"
+                if not cfg_path.exists():
+                    continue
+                try:
+                    cfg = yaml.safe_load(cfg_path.read_text())
+                except Exception:
+                    continue
+                if cfg.get("chain_name", "").lower() == chain_name:
+                    return cfg, folder
+
+        raise HTTPException(status_code=404, detail=f"Chain not found: {chain_name}")
+
+    chain_dir = CHAINS_DIR / chain_id
+    cfg_path = chain_dir / "chain.yaml"
+    if not cfg_path.exists():
+        raise HTTPException(status_code=404, detail=f"Chain config missing: {chain_id}")
+
+    try:
+        cfg = yaml.safe_load(cfg_path.read_text())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Invalid chain.yaml: {e}")
+
+    return cfg, chain_dir
+
+
 def discover_agents():
     # 🧪 Skip folder agent discovery ONLY for pytest TestClient (in-memory app),
     # but still allow discovery when pytest launches CLI subprocess.
@@ -530,71 +678,8 @@ def discover_agents():
                 load_module_from_path(f"{pkg}.handler", str(handler))
 
 
-def discover_chains():
-    """
-    At startup, discover chain configs in ~/.treehopper/registry/chains
-    and register a POST endpoint for each at /api/v1/chains/<chain_name>.
-    """
-    if not CHAINS_DIR.is_dir():
-        return
-
-    for chain_dir in CHAINS_DIR.iterdir():
-        if not chain_dir.is_dir():
-            continue
-
-        cfg_path = chain_dir / "chain.yaml"
-        if not cfg_path.exists():
-            continue
-
-        try:
-            cfg = yaml.safe_load(cfg_path.read_text())
-        except Exception:
-            continue
-
-        chain_name = cfg.get("chain_name")
-        chain_id = cfg.get("chain_id")
-        if not chain_name or not chain_id:
-            continue
-
-        chain_ep = cfg.get("chain_ep") or f"/{chain_name}"
-        route_path = chain_ep.replace("/api/v1/chains", "") or "/"
-
-        # Avoid duplicate registration: check if already added
-        already = any(
-            r.path == f"/api/v1/chains{route_path}" for r in router_chains.routes
-        )
-        if already:
-            continue
-
-        # Bind cfg + dir into default args to avoid late binding
-        local_cfg = cfg
-        local_dir = chain_dir
-
-        @router_chains.post(route_path)
-        async def chain_endpoint(
-            payload: dict[str, Any] = Body(default={}), _cfg=local_cfg, _dir=local_dir
-        ):
-            result = await _run_chain_spec(_cfg, payload or {})
-
-            history = {
-                "chain_name": _cfg.get("chain_name"),
-                "chain_id": _cfg.get("chain_id"),
-                "timestamp": datetime.utcnow().isoformat() + "Z",
-                "input": payload or {},
-                **result,
-            }
-            try:
-                hist_path = _dir / "last_run.json"
-                hist_path.write_text(json.dumps(history, indent=2), encoding="utf-8")
-            except Exception:
-                pass
-
-            status_code = 200 if result.get("success", True) else 500
-            return JSONResponse(status_code=status_code, content=result)
-
-
 discover_agents()
-discover_chains()
+# discover_chains()
 # Register routers
 app.include_router(router_agents)
 app.include_router(router_dev)
