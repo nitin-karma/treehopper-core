@@ -259,17 +259,22 @@ def chain_build(chain_name: str, agent_names: List[str]) -> None:
         steps.append(
             {
                 "agent_name": agent_name,
-                "path": meta["routes"]["by_name"],
+                "path": meta["routes"]["by_name"],  # e.g. /api/v1/agents/summarizer
                 "inputs": meta.get("inputs", []),
                 "outputs": meta.get("outputs", []),
             }
         )
+
     chain_id = f"{cname}-{uuid.uuid4().hex[:8]}"
     chain_dir = CHAINS_DIR / chain_id
     chain_dir.mkdir(parents=True, exist_ok=False)
 
+    chain_ep = f"/api/v1/chains/{cname}"
+
     cfg = {
         "chain_name": cname,
+        "chain_ep": chain_ep,
+        "chain_ep_type": "POST",
         "chain_id": chain_id,
         "agents": steps,
         "created_at": datetime.utcnow().isoformat() + "Z",
@@ -284,12 +289,14 @@ def chain_build(chain_name: str, agent_names: List[str]) -> None:
     save_chains_index(chains_index)
 
     print(f"✅ Created chain '{cname}' ({chain_id})")
+    print(f"📌 Endpoint: {chain_ep} [POST]")
     print("📌 Agents in sequence:")
     for i, s in enumerate(steps):
         print(f"  {i+1}. {s['agent_name']}  →  {s['path']}")
 
     print("\n▶ Example run (non-detached):")
-    print(f'  treehopper chain run {cname} --payload \'{{"document_text": "..."}}\'')
+    print(f'  treehopper chain run {cname} --payload \'{{"doc_text": "..."}}\'')
+
     print("▶ Example run (detached chain runtime):")
     print(f"  treehopper chain run {cname} --detached")
 
@@ -335,80 +342,51 @@ def parse_payload_args(args: List[str]) -> Dict[str, Any]:
     return {"args": remaining, "payload": payload or {}}
 
 
-def build_chain_body_for_exec(
-    chain_cfg: Dict[str, Any], root_payload: Dict[str, Any]
-) -> Dict[str, Any]:
-    steps = []
-    agents = chain_cfg.get("agents", [])
-
-    prev_output = None
-    for idx, step in enumerate(agents):
-        inputs = step.get("inputs", [])
-        outputs = step.get("outputs", [])
-
-        # first agent → external payload
-        if idx == 0:
-            params = root_payload
-
-        # subsequent agents → auto-wire
-        else:
-            params = {}
-            for inp in inputs:
-                name = inp["name"]  # expected input key
-                if prev_output and name in prev_output:
-                    params[name] = prev_output[name]
-
-        steps.append({"path": step["path"], "params": params})
-        prev_output = {
-            o["name"]: None for o in outputs
-        }  # placeholder; filled by chain runtime
-
-    return {"chain": steps}
-
-
 def chain_run_local(chain_ref: ChainRef, payload: Dict[str, Any]) -> None:
     """
-    Runs the chain against the MAIN Treehopper server (port 1560) by POSTing
-    to /api/v1/dev/chain.
+    Runs the chain against the MAIN Treehopper server by POSTing
+    directly to /api/v1/chains/<chain_name>.
     """
     ensure_main_server()
     cfg = load_chain_cfg(chain_ref)
-    body = build_chain_body_for_exec(cfg, payload)
 
-    print(f"▶ Executing chain '{chain_ref.chain_name}' via /api/v1/dev/chain")
-    r = requests.post(f"{BASE_URL}/api/v1/dev/chain", json=body, headers=API_KEY)
+    chain_ep = cfg.get("chain_ep") or f"/api/v1/chains/{chain_ref.chain_name}"
+    url = f"{BASE_URL}{chain_ep}"
+
+    print(f"▶ Executing chain '{chain_ref.chain_name}' via {url}")
+    r = requests.post(url, json=payload or {}, headers=API_KEY)
+
     try:
         data = r.json()
     except Exception:
         print(r.text)
         return
 
-    if "results" not in data:
-        print("⚠️ Unexpected response:", data)
-        return
+    status = "✓" if r.status_code == 200 and data.get("success", True) else "✗"
+    print(f"HTTP {r.status_code}   overall: {status}")
 
-    results = data["results"]
+    results = data.get("results", [])
     agents = cfg.get("agents", [])
     print("📊 Chain step results:")
     for i, res in enumerate(results):
         name = agents[i]["agent_name"] if i < len(agents) else f"step_{i}"
-        status = "✓ success"
+        step_status = "✓ success"
         if isinstance(res, dict) and "error" in res:
-            status = f"✗ error: {res['error']}"
-        print(f"  [{name}] {status}")
+            step_status = f"✗ error: {res['error']}"
+        print(f"  [{name}] {step_status}")
 
-    # store last run
     history_path = chain_ref.dir_path / "last_run.json"
-    history_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-    print("\n🔍 Full response stored at:")
-    print(f"  {history_path}")
+    if history_path.exists():
+        print("\n🔍 Full response stored at:")
+        print(f"  {history_path}")
+    else:
+        print("\nℹ️ No last_run.json written by server (check Treehopper logs).")
 
 
 def chain_run_detached(chain_ref: ChainRef, payload: Dict[str, Any]) -> None:
     """
     Start a dedicated uvicorn runtime for this chain on a predictable port,
-    then execute the chain once against that runtime's /api/v1/dev/chain.
+    then execute the chain once against that runtime's /api/v1/chains/<name>.
     """
     cfg = load_chain_cfg(chain_ref)
     port = derive_chain_port(chain_ref.chain_id)
@@ -460,10 +438,12 @@ def chain_run_detached(chain_ref: ChainRef, payload: Dict[str, Any]) -> None:
         else:
             print("⚠️ Chain runtime did not report healthy; continuing anyway.")
 
-    # Now call /dev/chain on the chain runtime
-    body = build_chain_body_for_exec(cfg, payload)
-    print(f"▶ Executing chain via {chain_url}/api/v1/dev/chain")
-    r = requests.post(f"{chain_url}/api/v1/dev/chain", json=body, headers=API_KEY)
+    # Now call the chain endpoint on that runtime
+    chain_ep = cfg.get("chain_ep") or f"/api/v1/chains/{chain_ref.chain_name}"
+    url = f"{chain_url}{chain_ep}"
+
+    print(f"▶ Executing chain via {url}")
+    r = requests.post(url, json=payload or {}, headers=API_KEY)
     try:
         data = r.json()
     except Exception:
@@ -475,16 +455,18 @@ def chain_run_detached(chain_ref: ChainRef, payload: Dict[str, Any]) -> None:
     print("📊 Chain step results:")
     for i, res in enumerate(results):
         name = agents[i]["agent_name"] if i < len(agents) else f"step_{i}"
-        status = "✓ success"
+        step_status = "✓ success"
         if isinstance(res, dict) and "error" in res:
-            status = f"✗ error: {res['error']}"
-        print(f"  [{name}] {status}")
+            step_status = f"✗ error: {res['error']}"
+        print(f"  [{name}] {step_status}")
 
     history_path = chain_ref.dir_path / "last_run.json"
-    history_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    if history_path.exists():
+        print("\n🔍 Full response stored at:")
+        print(f"  {history_path}")
+    else:
+        print("\nℹ️ No last_run.json written by server (check Treehopper logs).")
 
-    print("\n🔍 Full response stored at:")
-    print(f"  {history_path}")
     print(f"🌐 Chain runtime still available at: {chain_url}")
 
 
@@ -599,24 +581,27 @@ def print_chain_help() -> None:
 Treehopper Chain Commands
 ────────────────────────────────────────────
   treehopper chain build <name> <agent1> <agent2> ...
-      Register a named chain using registered agents
+      Register a named chain using registered agents.
+      Creates ~/.treehopper/registry/chains/<id>/chain.yaml
+      and a POST endpoint /api/v1/chains/<name>.
 
   treehopper chain run <name|id> [--payload '{...}'] [--payload-file path] [--detached]
-      Execute a named chain immediately (non-detached) or
-      start a dedicated runtime and execute once (--detached)
+      Execute a named chain immediately by calling its endpoint
+      /api/v1/chains/<name>. If --detached is used, a dedicated
+      Treehopper runtime is started on a separate port.
 
   treehopper chain stop <name|id>
-      Stop a dedicated chain runtime if running
+      Stop a dedicated chain runtime if running.
 
   treehopper chain delete <name|id>
-      Delete chain metadata and last run logs
+      Delete chain metadata and last run logs.
 
   treehopper chain logs <name|id>
-      Show last execution summary + JSON
+      Show last execution summary + JSON.
 
 Legacy:
   treehopper chain <agent_path1> <agent_path2> ...
-      Direct call to /api/v1/dev/chain with static agent paths
+      Direct call to /api/v1/dev/chain with static agent paths.
 """
     )
 

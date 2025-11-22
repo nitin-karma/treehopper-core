@@ -3,7 +3,7 @@ import sys
 import subprocess
 from pathlib import Path
 
-SCRIPT_NAME = "scripts/th_clean.sh"
+SCRIPT_NAME = "th_tools/th_clean.sh"
 
 
 def find_script() -> Path | None:
@@ -16,6 +16,7 @@ def find_script() -> Path | None:
 
     # 1) parent of this file  → treehopper-core/
     parent = Path(__file__).resolve().parent.parent / SCRIPT_NAME
+
     if parent.exists():
         return parent
 
@@ -36,12 +37,13 @@ def main():
     auto_yes = "-y" in sys.argv or "--yes" in sys.argv
 
     script = find_script()
+    print(f"Cleanup Script path - {script}")
     if not script:
         print("❌ th_clean.sh not found")
         print("Expected one of:")
-        print("  • treehopper-core/th_clean.sh")
+        print("  • treehopper-core/scripts/th_clean.sh")
         print("  • current working directory")
-        print("  • ~/.treehopper/tools/th_clean.sh")
+        # print("  • ~/.treehopper/tools/th_clean.sh")
         sys.exit(1)
 
     if not auto_yes:
