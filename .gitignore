@@ -37,3 +37,5 @@ build/
 tests/chipset_report.txt
 dev_env_cleaner.sh
 testing_scripts/*.log
+examples/test_file.txt
+**/.env

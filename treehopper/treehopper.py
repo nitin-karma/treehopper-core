@@ -273,6 +273,7 @@ async def list_chains():
 
 @router_chains.post("/{chain_name}")
 async def run_chain_endpoint(chain_name: str, payload: dict | None = None):
+    detached = False
     cfg, chain_dir = resolve_chain_by_name(chain_name)
     agents_cfg = cfg.get("agents", [])
 
@@ -314,7 +315,9 @@ async def run_chain_endpoint(chain_name: str, payload: dict | None = None):
         "chain_name": cfg.get("chain_name"),
         "chain_id": cfg.get("chain_id"),
         "executed_at": datetime.utcnow().isoformat() + "Z",
+        "input": payload or {},
         "results": results,
+        "detached": detached,
     }
     (chain_dir / "last_run.json").write_text(
         json.dumps(history, indent=2), encoding="utf-8"

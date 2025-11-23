@@ -33,7 +33,7 @@ PACKAGE_AGENTS_DIR = Path(__file__).parent / "agents"
 
 RUNTIME_DIR = TH_ROOT / "runtime"
 MAIN_PID_FILE = RUNTIME_DIR / "main_server.pid"
-CHAIN_PID_PREFIX = "chain_"
+CHAIN_PID_PREFIX = "det_chain_"
 
 
 # ---------------------------------------------------------------------
@@ -513,6 +513,7 @@ def build_agent(agent_ref: str) -> None:
     cfg = validate_agent_yaml(agent_dir)
     agent_name = validate_agent_name(cfg["agent_name"])
     agent_id = cfg["agent_id"]
+    subscription_id = cfg["subscription_id"]
     entrypoint = cfg["entrypoint"]
 
     # 🚨 enforce schema fields
@@ -542,6 +543,7 @@ def build_agent(agent_ref: str) -> None:
         {
             "agent_name": agent_name,
             "agent_id": agent_id,
+            "subscription_id": subscription_id,
             "entrypoint": entrypoint,
             "routes": {
                 "by_name": f"/api/v1/agents/{agent_name}",
@@ -696,6 +698,89 @@ def run_chain_from_cli(args: list[str]):
     print(r.text)
 
 
+# inside some agents CLI module
+
+AGENT_RUNTIME_PREFIX = "det_agent_"
+
+
+def derive_agent_port(agent_id: str) -> int:
+    """
+    Deterministic, non-overlapping-ish ports for agents:
+    22000–23999 range based on agent_id hash.
+    """
+    h = abs(hash(agent_id))
+    return 22000 + (h % 2000)
+
+
+def resolve_agent_meta(agent_name_or_id: str) -> dict:
+    index = load_agents_index()
+    # try name first
+    for a in index:
+        if a["agent_name"] == agent_name_or_id or a["agent_id"] == agent_name_or_id:
+            return a
+    print(f"❌ Agent not found: {agent_name_or_id}")
+    sys.exit(1)
+
+
+def agent_run_detached(ref: str) -> None:
+    meta = resolve_agent_meta(ref)
+    agent_id = meta["agent_id"]
+    port = derive_agent_port(agent_id)
+    url = f"http://localhost:{port}"
+    pid_file = RUNTIME_DIR / f"{AGENT_RUNTIME_PREFIX}{agent_id}.pid"
+
+    existing_pid = read_pid(pid_file)
+    if existing_pid:
+        try:
+            os.kill(existing_pid, 0)
+            print(
+                f"ℹ️ Agent runtime already running for '{meta['agent_name']}' "
+                f"(PID {existing_pid}) on {url}"
+            )
+            return
+        except ProcessLookupError:
+            pid_file.unlink(missing_ok=True)
+
+    print(f"🚀 Starting detached agent runtime for '{meta['agent_name']}' on {url}")
+    env = os.environ.copy()
+    env["PROD"] = "1"
+    proc = subprocess.Popen(
+        [
+            "uvicorn",
+            "treehopper.agent_runtime_app:app",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            str(port),
+        ],
+        env=env,
+    )
+    write_pid(pid_file, proc.pid)
+
+    # you can add a small /health polling here like for chains
+
+    print(f"✅ Agent '{meta['agent_name']}' runtime PID {proc.pid}")
+    print(
+        f"📌 POST {url}/api/v1/agent/run with JSON {{\"path\": \"{meta['routes']['by_name']}\", \"payload\": {{...}}}}"
+    )
+
+
+def agent_stop(ref: str) -> None:
+    meta = resolve_agent_meta(ref)
+    agent_id = meta["agent_id"]
+    pid_file = RUNTIME_DIR / f"{AGENT_RUNTIME_PREFIX}{agent_id}.pid"
+    pid = read_pid(pid_file)
+
+    if not pid:
+        print(f"ℹ️ No detached runtime for agent '{meta['agent_name']}'")
+        return
+
+    print(f"🛑 Stopping agent runtime '{meta['agent_name']}' (PID {pid})")
+    kill_pid(pid)
+    pid_file.unlink(missing_ok=True)
+    print("✔ Stopped")
+
+
 # ---------------------------------------------------------------------
 # TREEHOPPER HELP
 # ---------------------------------------------------------------------
@@ -706,21 +791,30 @@ def print_help():
         """
 Treehopper CLI Commands
 ────────────────────────────────────────────
+  Main Server/Process commands
+  ============================
+  treehopper status                                Show if the main server is running
   treehopper run                                   Start the main server
   treehopper run --bg                              Start the main server in background
   treehopper stop                                  Stop the main server
   treehopper restart                               Restart main server
   treehopper list                                  List installed agents
+  treehopper clean                                 Be Careful - To cleanup the servers, pids, agents, chain
+
+  Agent Related CLI Commands -
+  ============================
+  treehopper push-file <agent-name> <file_path>    To push the input file to agent for any file operations
   treehopper call <path> '<json>'                  Call an agent
   treehopper init <agent_name>                     Create agent scaffold template
   treehopper lint <agent_folder>                   Validate handler.py + YAML
-  treehopper build <agent_folder>                  Install agent to registry
+  treehopper build <agent_folder>                  Install agent to registry and make it available with main server
   treehopper agent info <ref>                      Show metadata
-  treehopper status                                Show if the main server is running
+  treehopper run <agent_name> --detached           To run the agent in detached mode
   treehopper agent delete <ref>                    Delete installed agent safely
+
+  Chain Related CLI Commands
+  ==========================
   treehopper chain                                 To view all Chain related commands
-  treehopper push-file <agent-name> <file_path>    To push the input file to agent for any file operations
-  treehopper clean                                 Be Careful - To cleanup the servers, pids, agents, chain
 """
     )
 
@@ -770,6 +864,12 @@ def main() -> None:
         status()
     elif cmd == "agent" and sys.argv[2] == "delete":
         delete_agent(sys.argv[3])
+    elif cmd == "agent":
+        cmd = sys.argv[2]
+        if cmd == "run" and "--detached" in sys.argv:
+            agent_run_detached(sys.argv[3])
+        elif cmd == "stop":
+            agent_stop(sys.argv[3])
     elif cmd == "push-file":
         if len(sys.argv) != 4:
             print("Usage: treehopper push-file <agent_name> <path>")

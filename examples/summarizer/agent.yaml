@@ -1,0 +1,14 @@
+agent_name: summarizer
+agent_id: summarizer-79b25d4c
+subscription_id: a75110fc-0cec-45fc-8ca7-edfe63744497
+entrypoint: /summarizer
+chain_ids: []
+description: summarizer agent
+inputs:
+- name: formatted
+  type: string
+outputs:
+- name: summary
+  type: string
+tags: []
+version: '1.0'

@@ -18,6 +18,7 @@ from treehopper.utils.shared_files import (
     has_only_one_shared_file,
     get_the_only_shared_file,
 )
+from treehopper.treehopper_cli import get_or_create_subscription_id
 
 
 # -----------------------------------------------------------------------------
@@ -38,7 +39,7 @@ CHAINS_DIR = REGISTRY_DIR / "chains"
 CHAINS_INDEX = REGISTRY_DIR / "chains.json"
 
 RUNTIME_DIR = TH_ROOT / "runtime"
-CHAIN_PID_PREFIX = "chain_"
+CHAIN_PID_PREFIX = "det_chain_"
 
 
 # -----------------------------------------------------------------------------
@@ -276,10 +277,12 @@ def chain_build(chain_name: str, agent_names: List[str]) -> None:
     chain_dir.mkdir(parents=True, exist_ok=False)
 
     endpoint = f"/api/v1/chains/{cname}"
+    subscription_id = get_or_create_subscription_id()
 
     cfg = {
         "chain_name": cname,
         "chain_id": chain_id,
+        "subscription_id": subscription_id,
         "endpoint": endpoint,
         "method": "POST",
         "agents": steps,
@@ -291,7 +294,9 @@ def chain_build(chain_name: str, agent_names: List[str]) -> None:
         yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8"
     )
 
-    chains_index.append({"chain_name": cname, "chain_id": chain_id})
+    chains_index.append(
+        {"chain_name": cname, "chain_id": chain_id, "subscription_id": subscription_id}
+    )
     save_chains_index(chains_index)
 
     print(f"✅ Created chain '{cname}' ({chain_id})")
@@ -355,6 +360,7 @@ def chain_run_local(chain_ref: ChainRef, payload: Dict[str, Any]) -> None:
     Execute the chain via the main Treehopper server's
     /api/v1/chains/{name} endpoint.
     """
+    # detached = False
     ensure_main_server()
     cfg = load_chain_cfg(chain_ref)
     endpoint = cfg.get("endpoint") or f"/api/v1/chains/{chain_ref.chain_name}"
@@ -411,15 +417,19 @@ def chain_run_local(chain_ref: ChainRef, payload: Dict[str, Any]) -> None:
 
 def chain_run_detached(chain_ref: ChainRef, payload: Dict[str, Any]) -> None:
     """
-    Start a dedicated uvicorn runtime for this chain on a predictable port,
-    then execute the chain once via its /api/v1/chains/{name} endpoint.
+    Start a dedicated uvicorn *chain micro-app* for this chain on a predictable port,
+    then execute the chain once via its /api/v1/chain/run endpoint.
+
+    The micro-app is treehopper.chain_runtime_app:app
+    and is stateless: each call must send {agents, payload}.
     """
+    detached = True
     cfg = load_chain_cfg(chain_ref)
     port = derive_chain_port(chain_ref.chain_id)
     chain_url = f"http://localhost:{port}"
     pid_file = RUNTIME_DIR / f"{CHAIN_PID_PREFIX}{chain_ref.chain_id}.pid"
 
-    # If already running, reuse
+    # If already running, reuse it
     existing_pid = read_pid(pid_file)
     if existing_pid:
         try:
@@ -438,10 +448,11 @@ def chain_run_detached(chain_ref: ChainRef, payload: Dict[str, Any]) -> None:
         )
         env = os.environ.copy()
         env["PROD"] = "1"
+        # ▶ NOTE: use the *chain micro-app* here, not the full Treehopper app
         proc = subprocess.Popen(
             [
                 "uvicorn",
-                "treehopper.treehopper:app",
+                "treehopper.chain_runtime_app:app",
                 "--host",
                 "0.0.0.0",
                 "--port",
@@ -455,36 +466,35 @@ def chain_run_detached(chain_ref: ChainRef, payload: Dict[str, Any]) -> None:
         for _ in range(40):
             time.sleep(0.25)
             try:
-                r = requests.get(f"{chain_url}/api/v1/sys/health", timeout=0.25)
+                r = requests.get(
+                    f"{chain_url}/api/v1/{chain_ref.chain_name}/health", timeout=0.25
+                )
                 if r.status_code == 200:
-                    print("✅ Chain runtime healthy")
+                    print("✅ Chain micro-app runtime healthy")
                     break
             except Exception:
                 continue
         else:
-            print("⚠️ Chain runtime did not report healthy; continuing anyway.")
+            print("⚠️ Chain micro-app did not report healthy; continuing anyway.")
 
-    endpoint = cfg.get("endpoint") or f"/api/v1/chains/{chain_ref.chain_name}"
-    url = f"{chain_url}{endpoint}"
+    # Prepare request body for micro-app
+    agents_spec = cfg.get("agents", [])
+    body = {"agents": agents_spec, "payload": payload or {}}
 
-    # ⬇ INSERT PATCH HERE
-    first_agent = cfg.get("agents", [])[0] if cfg.get("agents") else None
-    if first_agent:
-        first_agent_id = first_agent.get("agent_id", "")
-        if payload == {} and has_only_one_shared_file(first_agent_id):
-            auto_path = get_the_only_shared_file(first_agent_id)
-            print(f"🔌 Auto-injecting payload: file_path='{auto_path}'")
-            payload = {"file_path": auto_path}
-    # ⬆ PATCH END
-
+    url = f"{chain_url}/api/v1/{chain_ref.chain_name}/run"
     print(f"▶ Executing chain via {url}")
-    r = requests.post(url, json=payload or {}, headers=API_KEY)
+    r = requests.post(url, json=body, headers=API_KEY)
 
     try:
         data = r.json()
     except Exception:
         print(f"HTTP {r.status_code}")
         print(r.text)
+        return
+
+    if r.status_code != 200:
+        print(f"HTTP {r.status_code}")
+        print(data)
         return
 
     results = data.get("results", [])
@@ -498,14 +508,120 @@ def chain_run_detached(chain_ref: ChainRef, payload: Dict[str, Any]) -> None:
             status = f"✗ error: {res['error']}"
         print(f"  [{name}] {status}")
 
+    # For detached micro-app: CLI writes last_run.json itself
     history_path = chain_ref.dir_path / "last_run.json"
-    if history_path.exists():
-        print("\n🔍 Full response stored at:")
-        print(f"  {history_path}")
-    else:
-        print("\nℹ️ No last_run.json written by server (check Treehopper logs).")
+    history = {
+        "chain_name": cfg.get("chain_name"),
+        "chain_id": cfg.get("chain_id"),
+        "executed_at": datetime.utcnow().isoformat() + "Z",
+        "input": payload or {},
+        "results": results,
+        "detached": detached,
+    }
+    history_path.write_text(json.dumps(history, indent=2), encoding="utf-8")
 
-    print(f"🌐 Chain runtime still available at: {chain_url}")
+    print("\n🔍 Full response stored at:")
+    print(f"  {history_path}")
+    print(f"🌐 Chain micro-app runtime still available at: {chain_url}")
+
+
+# def chain_run_detached(chain_ref: ChainRef, payload: Dict[str, Any]) -> None:
+#     """
+#     Start a dedicated uvicorn runtime for this chain on a predictable port,
+#     then execute the chain once via its /api/v1/chains/{name} endpoint.
+#     """
+#     cfg = load_chain_cfg(chain_ref)
+#     port = derive_chain_port(chain_ref.chain_id)
+#     chain_url = f"http://localhost:{port}"
+#     pid_file = RUNTIME_DIR / f"{CHAIN_PID_PREFIX}{chain_ref.chain_id}.pid"
+
+#     # If already running, reuse
+#     existing_pid = read_pid(pid_file)
+#     if existing_pid:
+#         try:
+#             os.kill(existing_pid, 0)
+#             print(
+#                 f"ℹ️ Chain runtime already running for '{chain_ref.chain_name}' "
+#                 f"(PID {existing_pid}) on {chain_url}"
+#             )
+#         except ProcessLookupError:
+#             pid_file.unlink(missing_ok=True)
+#             existing_pid = None
+
+#     if not existing_pid:
+#         print(
+#             f"🚀 Starting dedicated chain runtime for '{chain_ref.chain_name}' on {chain_url}"
+#         )
+#         env = os.environ.copy()
+#         env["PROD"] = "1"
+#         proc = subprocess.Popen(
+#             [
+#                 "uvicorn",
+#                 "treehopper.treehopper:app",
+#                 "--host",
+#                 "0.0.0.0",
+#                 "--port",
+#                 str(port),
+#             ],
+#             env=env,
+#         )
+#         write_pid(pid_file, proc.pid)
+
+#         # wait for /health
+#         for _ in range(40):
+#             time.sleep(0.25)
+#             try:
+#                 r = requests.get(f"{chain_url}/api/v1/sys/health", timeout=0.25)
+#                 if r.status_code == 200:
+#                     print("✅ Chain runtime healthy")
+#                     break
+#             except Exception:
+#                 continue
+#         else:
+#             print("⚠️ Chain runtime did not report healthy; continuing anyway.")
+
+#     endpoint = cfg.get("endpoint") or f"/api/v1/chains/{chain_ref.chain_name}"
+#     url = f"{chain_url}{endpoint}"
+
+#     # ⬇ INSERT PATCH HERE
+#     first_agent = cfg.get("agents", [])[0] if cfg.get("agents") else None
+#     if first_agent:
+#         first_agent_id = first_agent.get("agent_id", "")
+#         if payload == {} and has_only_one_shared_file(first_agent_id):
+#             auto_path = get_the_only_shared_file(first_agent_id)
+#             print(f"🔌 Auto-injecting payload: file_path='{auto_path}'")
+#             payload = {"file_path": auto_path}
+#     # ⬆ PATCH END
+
+#     print(f"▶ Executing chain via {url}")
+#     r = requests.post(url, json=payload or {}, headers=API_KEY)
+
+#     try:
+#         data = r.json()
+#     except Exception:
+#         print(f"HTTP {r.status_code}")
+#         print(r.text)
+#         return
+
+#     results = data.get("results", [])
+#     agents = cfg.get("agents", [])
+
+#     print("📊 Chain step results:")
+#     for i, res in enumerate(results):
+#         name = agents[i]["agent_name"] if i < len(agents) else f"step_{i}"
+#         status = "✓ success"
+#         if isinstance(res, dict) and "error" in res:
+#             status = f"✗ error: {res['error']}"
+#         print(f"  [{name}] {status}")
+
+#     history_path = chain_ref.dir_path / "last_run.json"
+#     if history_path.exists():
+#         print("\n🔍 Full response stored at:")
+#         print(f"  {history_path}")
+#     else:
+#         print("\nℹ️ No last_run.json written by server (check Treehopper logs).")
+
+#     print(f"🌐 Chain runtime still available at: {chain_url}")
 
 
 # -----------------------------------------------------------------------------

@@ -1,0 +1,14 @@
+agent_name: formatter
+agent_id: formatter-264431cc
+subscription_id: a75110fc-0cec-45fc-8ca7-edfe63744497
+entrypoint: /formatter
+chain_ids: []
+description: formatter agent
+inputs:
+- name: file_path
+  type: string
+outputs:
+- name: formatted
+  type: string
+tags: []
+version: '1.0'
