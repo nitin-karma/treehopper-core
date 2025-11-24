@@ -2,6 +2,9 @@
 set +e
 LOG_FILE="./chain_test_$(date +%Y%m%d_%H%M%S).log"
 
+AGENT_PORT=9111
+CHAIN_PORT=9112
+
 echo ""
 echo "🧪 Treehopper Full Chain Test Started"
 echo "Log file: $LOG_FILE"
@@ -26,8 +29,8 @@ echo "" | tee -a "$LOG_FILE"
 ###############################################################################
 echo "STEP 2 — Start main server" | tee -a "$LOG_FILE"
 treehopper run --bg | tee -a "$LOG_FILE"
-echo "" | tee -a "$LOG_FILE"
 sleep 4
+echo "" | tee -a "$LOG_FILE"
 
 ###############################################################################
 # STEP 3 — Lint agents
@@ -62,7 +65,7 @@ echo "" | tee -a "$LOG_FILE"
 
 treehopper restart | tee -a "$LOG_FILE"
 sleep 4
-
+echo "" | tee -a "$LOG_FILE"
 ###############################################################################
 # STEP 6 — Build chain
 ###############################################################################
@@ -72,7 +75,7 @@ echo "" | tee -a "$LOG_FILE"
 
 treehopper restart | tee -a "$LOG_FILE"
 sleep 4
-
+echo "" | tee -a "$LOG_FILE"
 ###############################################################################
 # STEP 7 — Test agents via CLI
 ###############################################################################
@@ -80,19 +83,24 @@ echo "STEP 7 — Call formatter agent directly" | tee -a "$LOG_FILE"
 treehopper call /api/v1/agents/formatter "{\"file_path\": \"$FILE_PATH\"}" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 
-echo "STEP 8 — Call summarizer agent directly" | tee -a "$LOG_FILE"
-treehopper call /api/v1/agents/summarizer '{"formatted": "dummy"}' | tee -a "$LOG_FILE"
-echo "" | tee -a "$LOG_FILE"
+sleep 4
+###############################################################################
+# STEP 8 — Test agents via CLI
+###############################################################################
 
+echo "STEP 8 — Call summarizer agent directly" | tee -a "$LOG_FILE"
+treehopper call /api/v1/agents/summarizer '{"formatted": "The storm raged across the quiet town. A lone lantern flickered in the darkness. Hope rose as neighbors gathered together. By dawn, unity had rebuilt what was lost."}' | tee -a "$LOG_FILE"
+echo "" | tee -a "$LOG_FILE"
+sleep 4
 ###############################################################################
 # STEP 9 — Execute chain via CLI
 ###############################################################################
 echo "STEP 9 — Execute chain via CLI" | tee -a "$LOG_FILE"
-treehopper chain run exec_summ --payload "{\"file_path\":\"$FILE_PATH\"}" | tee -a "$LOG_FILE"
+treehopper chain run exec_summ --payload "{\"file_path\": \"$FILE_PATH\"}"  | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 
 tail -n 40 "$HOME/.treehopper/runtime/server.log" >> "$LOG_FILE" 2>/dev/null
-
+echo "" | tee -a "$LOG_FILE"
 ###############################################################################
 # STEP 10 — Chain logs
 ###############################################################################
@@ -121,15 +129,16 @@ echo "" | tee -a "$LOG_FILE"
 ###############################################################################
 echo "STEP 12 — Agent detached runtime test" | tee -a "$LOG_FILE"
 
-treehopper agent run formatter --detached | tee -a "$LOG_FILE"
-PORT=$(treehopper agent port formatter)
-URL="http://localhost:$PORT/api/v1/formatter/run"
+treehopper agent run formatter --detached --bg --port $AGENT_PORT | tee -a "$LOG_FILE"
+URL="http://localhost:$AGENT_PORT/api/v1/formatter/run"
+sleep 4
 
 python3 - <<EOF | tee -a "$LOG_FILE"
 import requests
 r=requests.post("$URL", json={"file_path": "$FILE_PATH"}, headers={"x-api-key":"demo-key-123"})
 print("DETACHED-FORMATTER:", r.status_code, r.text)
 EOF
+sleep 4
 treehopper agent stop formatter | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 
@@ -138,15 +147,15 @@ echo "" | tee -a "$LOG_FILE"
 ###############################################################################
 echo "STEP 13 — Chain detached runtime test" | tee -a "$LOG_FILE"
 
-treehopper chain run exec_summ --detached | tee -a "$LOG_FILE"
-CHAIN_PORT=$(treehopper chain port exec_summ)
-CURL_URL="http://localhost:$CHAIN_PORT/api/v1/chains/exec_summ/run"
-
+treehopper chain run exec_summ --detached --bg --port $CHAIN_PORT | tee -a "$LOG_FILE"
+CURL_URL="http://localhost:$CHAIN_PORT/api/v1/exec_summ/run"
+sleep 4
 python3 - <<EOF | tee -a "$LOG_FILE"
 import requests
 r=requests.post("$CURL_URL", json={"file_path": "$FILE_PATH"}, headers={"x-api-key":"demo-key-123"})
 print("DETACHED-CHAIN:", r.status_code, r.text)
 EOF
+sleep 4
 treehopper chain stop exec_summ | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 

@@ -68,7 +68,7 @@ app = FastAPI(
     title="Treehopper Agentic API",
     docs_url=None,
     redoc_url=None,
-    version="0.1.0",
+    version=VERSION,
 )
 
 

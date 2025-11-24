@@ -24,7 +24,7 @@ if [[ $YES -ne 1 ]]; then
   echo "   • ~/.treehopper/registry/chains + chains.json"
   echo "   • ~/.treehopper/registry/shared"
   echo "   • ~/.treehopper/runtime/*.pid"
-  echo "   • ~/.treehopper/runtime/server.log"
+  echo "   • ~/.treehopper/runtime/*.log"
   echo "🚫 subscription_id.txt will NOT be deleted"
   echo ""
   read -p "Proceed? (y/N): " yn
@@ -57,7 +57,7 @@ fi
 echo ""
 echo "🗑 Removing runtime logs and PIDs..."
 rm -f "$TH_ROOT/runtime/"*.pid
-rm -f "$TH_ROOT/runtime/server.log"
+rm -f "$TH_ROOT/runtime/"*.log
 
 echo "🗑 Removing .treehopper_memory..."
 rm -rf "$HOME_MEM"

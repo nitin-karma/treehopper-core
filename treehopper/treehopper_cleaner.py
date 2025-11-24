@@ -48,7 +48,7 @@ def main():
 
     if not auto_yes:
         print("⚠️ Cleanup will delete:")
-        print("   • server logs")
+        print("   • server / agents / chains logs")
         print("   • installed agents")
         print("   • chains registry")
         print("   • shared uploads")

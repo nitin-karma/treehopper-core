@@ -14,6 +14,7 @@ import uvicorn
 import yaml
 from dotenv import load_dotenv
 from tabulate import tabulate
+import socket
 
 import signal
 
@@ -703,6 +704,12 @@ def run_chain_from_cli(args: list[str]):
 AGENT_RUNTIME_PREFIX = "det_agent_"
 
 
+def is_port_in_use(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.2)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
 def derive_agent_port(agent_id: str) -> int:
     """
     Deterministic, non-overlapping-ish ports for agents:
@@ -722,10 +729,19 @@ def resolve_agent_meta(agent_name_or_id: str) -> dict:
     sys.exit(1)
 
 
-def agent_run_detached(ref: str) -> None:
+def agent_run_detached(ref: str, port_override: int | None = None) -> None:
     meta = resolve_agent_meta(ref)
     agent_id = meta["agent_id"]
-    port = derive_agent_port(agent_id)
+    agent_name = meta["agent_name"]
+
+    # Either derive or honor explicit port
+    port = port_override if port_override is not None else derive_agent_port(agent_id)
+
+    # Strict mode: if explicit port is in use → error and exit
+    if port_override is not None and is_port_in_use(port):
+        print(f"❌ Port {port} is already in use. Choose a different port.")
+        sys.exit(1)
+
     url = f"http://localhost:{port}"
     pid_file = RUNTIME_DIR / f"{AGENT_RUNTIME_PREFIX}{agent_id}.pid"
 
@@ -734,16 +750,22 @@ def agent_run_detached(ref: str) -> None:
         try:
             os.kill(existing_pid, 0)
             print(
-                f"ℹ️ Agent runtime already running for '{meta['agent_name']}' "
+                f"ℹ️ Agent runtime already running for '{agent_name}' "
                 f"(PID {existing_pid}) on {url}"
             )
+            print(f"📌 POST   {url}/api/v1/{agent_name}/run")
+            print(f"🔍 Health {url}/api/v1/{agent_name}/health")
             return
         except ProcessLookupError:
             pid_file.unlink(missing_ok=True)
 
-    print(f"🚀 Starting detached agent runtime for '{meta['agent_name']}' on {url}")
+    print(f"🚀 Starting detached agent runtime for '{agent_name}' on {url}")
     env = os.environ.copy()
     env["PROD"] = "1"
+    env["AGENT_NAME"] = agent_name
+
+    LOG_FILE = RUNTIME_DIR / f"agent_{agent_name}-{agent_id}.log"
+
     proc = subprocess.Popen(
         [
             "uvicorn",
@@ -754,15 +776,14 @@ def agent_run_detached(ref: str) -> None:
             str(port),
         ],
         env=env,
+        stdout=open(LOG_FILE, "w"),
+        stderr=subprocess.STDOUT,
     )
     write_pid(pid_file, proc.pid)
 
-    # you can add a small /health polling here like for chains
-
-    print(f"✅ Agent '{meta['agent_name']}' runtime PID {proc.pid}")
-    print(
-        f"📌 POST {url}/api/v1/agent/run with JSON {{\"path\": \"{meta['routes']['by_name']}\", \"payload\": {{...}}}}"
-    )
+    print(f"📝 Agent runtime logs → {LOG_FILE}")
+    print(f"📌 POST   {url}/api/v1/{agent_name}/run")
+    print(f"🔍 Health {url}/api/v1/{agent_name}/health")
 
 
 def agent_stop(ref: str) -> None:
@@ -809,8 +830,9 @@ Treehopper CLI Commands
   treehopper lint <agent_folder>                   Validate handler.py + YAML
   treehopper build <agent_folder>                  Install agent to registry and make it available with main server
   treehopper agent info <ref>                      Show metadata
-  treehopper run <agent_name> --detached           To run the agent in detached mode
+  treehopper agent run <name> --detached [--bg]    Start dedicated agent runtime (optionally in background)
   treehopper agent delete <ref>                    Delete installed agent safely
+
 
   Chain Related CLI Commands
   ==========================
@@ -852,8 +874,6 @@ def main() -> None:
         lint_agent(sys.argv[2])
     elif cmd == "build":
         build_agent(sys.argv[2])
-    elif cmd == "agent" and sys.argv[2] == "info":
-        agent_info(sys.argv[3])
     elif cmd == "chain" and len(sys.argv) > 2 and sys.argv[2] == "stop":
         stop_chain()
     elif cmd == "chain":
@@ -862,14 +882,56 @@ def main() -> None:
         chain_entry(sys.argv[2:])
     elif cmd == "status":
         status()
-    elif cmd == "agent" and sys.argv[2] == "delete":
-        delete_agent(sys.argv[3])
     elif cmd == "agent":
-        cmd = sys.argv[2]
-        if cmd == "run" and "--detached" in sys.argv:
-            agent_run_detached(sys.argv[3])
-        elif cmd == "stop":
+        sub = sys.argv[2]
+        if sub == "run" and "--detached" in sys.argv:
+            if len(sys.argv) < 4:
+                print(
+                    "Usage: treehopper agent run <name> --detached "
+                    "[--port <port>] [--bg]"
+                )
+                sys.exit(1)
+
+            ref = sys.argv[3]
+            port_override: int | None = None
+
+            if "--port" in sys.argv:
+                idx = sys.argv.index("--port")
+                if idx + 1 >= len(sys.argv):
+                    print("❌ Missing value for --port")
+                    sys.exit(1)
+                try:
+                    port_override = int(sys.argv[idx + 1])
+                except ValueError:
+                    print("❌ Invalid value for --port (must be integer)")
+                    sys.exit(1)
+
+            # --bg is accepted but not used (runtime is always backgrounded)
+            agent_run_detached(ref, port_override)
+
+        elif sub == "stop":
+            if len(sys.argv) < 4:
+                print("Usage: treehopper agent stop <name|id>")
+                sys.exit(1)
             agent_stop(sys.argv[3])
+
+        elif sub == "info":
+            if len(sys.argv) < 4:
+                print("Usage: treehopper agent info <ref>")
+                sys.exit(1)
+            agent_info(sys.argv[3])
+
+        elif sub == "delete":
+            if len(sys.argv) < 4:
+                print("Usage: treehopper agent delete <ref>")
+                sys.exit(1)
+            delete_agent(sys.argv[3])
+
+        else:
+            print(f"Unknown agent subcommand: {sub}")
+            print_help()
+            sys.exit(1)
+
     elif cmd == "push-file":
         if len(sys.argv) != 4:
             print("Usage: treehopper push-file <agent_name> <path>")
