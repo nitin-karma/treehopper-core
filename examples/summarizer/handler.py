@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from .schema import SummarizerRequest
 
 load_dotenv()
-api_key = os.getenv("openai_api_key")
+api_key = os.getenv("th_apikey")
 
 
 class SummarizerAgent:
@@ -21,7 +21,13 @@ Content:
 {document_text}
 """
         llm = await call_llm(prompt=prompt, api_key=api_key)
-        return {"summary": llm.get("message", "")}
+        print(llm)
+        if "error" in llm:
+            error = (llm.get("error") or "").strip()
+            print({"summary": error})
+            return {"summary": ""}
+        safe = (llm.get("message") or "").strip()
+        return {"summary": safe}
 
 
 @agent("summarizer", method="POST", goal="Summarize long executive documents")

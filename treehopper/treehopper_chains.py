@@ -425,6 +425,7 @@ def chain_run_detached(
     chain_ref: ChainRef,
     payload: Dict[str, Any],
     port_override: int | None = None,
+    run_once: bool = True,
 ) -> None:
     """
     Start a dedicated uvicorn *chain micro-app* for this chain on a predictable port,
@@ -509,10 +510,14 @@ def chain_run_detached(
                 continue
         else:
             print("⚠️ Chain micro-app did not report healthy; continuing anyway.")
+    if not run_once:
+        print(f"🌐 Chain runtime is ready on {chain_url}")
+        print(f"📌 POST {chain_url}/api/v1/{chain_ref.chain_name}/run")
+        print(f"🔍 Health {chain_url}/api/v1/{chain_ref.chain_name}/health")
+        return
 
     # Prepare request body for micro-app
-    agents_spec = cfg.get("agents", [])
-    body = {"agents": agents_spec, "payload": payload or {}}
+    body = payload or {}
 
     url = f"{chain_url}/api/v1/{chain_ref.chain_name}/run"
     print(f"▶ Executing chain via {url}")
@@ -732,11 +737,14 @@ def chain_entry(argv: List[str]) -> None:
             extra_args = parsed["args"]
             payload = parsed["payload"]
 
-            detached = False
-            if "--detached" in extra_args:
-                detached = True
-                extra_args = [a for a in extra_args if a != "--detached"]
+            # ---- detect flags in correct order ----
+            detached = "--detached" in extra_args
+            extra_args = [a for a in extra_args if a != "--detached"]
 
+            bg = "--bg" in extra_args  # run micro-app only (no auto exec)
+            extra_args = [a for a in extra_args if a != "--bg"]
+
+            # ---- detect --port before unrecognized check ----
             port_override: int | None = None
             if "--port" in extra_args:
                 idx = extra_args.index("--port")
@@ -748,17 +756,21 @@ def chain_entry(argv: List[str]) -> None:
                 except ValueError:
                     print("❌ Invalid value for --port (must be integer)")
                     sys.exit(1)
-                # remove --port and its value from extra_args
                 del extra_args[idx : idx + 2]
 
-            # --bg is accepted but ignored at CLI level; runtime is always backgrounded
-
+            # ---- warn for any remaining flags ----
             if extra_args:
                 print(f"⚠️ Ignoring unrecognized args: {extra_args}")
 
+            # ---- execute ----
             chain_ref = resolve_chain(ref)
             if detached:
-                chain_run_detached(chain_ref, payload, port_override=port_override)
+                chain_run_detached(
+                    chain_ref,
+                    payload,
+                    port_override=port_override,
+                    run_once=not bg,  # TRUE → run immediately, FALSE → micro-app only
+                )
             else:
                 chain_run_local(chain_ref, payload)
             return
@@ -784,5 +796,5 @@ def chain_entry(argv: List[str]) -> None:
             chain_logs(argv[1])
             return
 
-    # legacy mode: treat all args as agent paths
+    # ---- legacy mode: treat all args as direct agent paths ----
     simple_chain_run(argv)

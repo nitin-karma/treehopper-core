@@ -9,7 +9,7 @@ from .schema import FormatterRequest
 from dotenv import load_dotenv
 
 load_dotenv()
-api_key = os.getenv("openai_api_key")
+api_key = os.getenv("th_apikey")
 MAX_TEXT_FILE_SIZE = 200 * 1024  # 200 KB
 agent_name = "formatter"
 agent_id = get_agent_id(agent_name)
@@ -25,7 +25,12 @@ CONTENT:
 {doc_text}
 """
         llm = await call_llm(prompt=prompt, api_key=api_key)
-        safe = llm.get("message", "").strip()
+        print(llm)
+        if "error" in llm:
+            error = (llm.get("error") or "").strip()
+            print({"formatted": error})
+            return {"formatted": ""}
+        safe = (llm.get("message") or "").strip()
         return {"formatted": safe}
 
 
@@ -94,6 +99,7 @@ async def handle(payload: FormatterRequest = Body(...)):
         )
 
     doc_text = data.decode("utf-8", errors="ignore")
+    print(f"length of the text - {len(doc_text)}")
     if not doc_text.strip():
         raise HTTPException(status_code=400, detail="File contains no readable text")
 

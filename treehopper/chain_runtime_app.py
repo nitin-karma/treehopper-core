@@ -1,27 +1,24 @@
 import os
+import json
 from datetime import datetime
 from typing import Any, Dict, List
 
 from fastapi import FastAPI, Body, HTTPException
-from pydantic import BaseModel
-
 from treehopper.treehopper import _run_agent_path, VERSION
+from treehopper.treehopper_chains import load_chain_cfg, resolve_chain
 
 CHAIN_NAME = os.getenv("CHAIN_NAME")
-
 if not CHAIN_NAME:
-    raise RuntimeError(
-        "CHAIN_NAME environment variable is required for chain runtime. "
-        "Example: CHAIN_NAME=exec_summ uvicorn treehopper.chain_runtime_app:app ..."
-    )
-
-
-class ChainRunBody(BaseModel):
-    agents: List[Dict[str, Any]]
-    payload: Dict[str, Any] = {}
-
+    raise RuntimeError("CHAIN_NAME environment variable required")
 
 app = FastAPI(title=f"Treehopper v{VERSION} Chain Runtime ({CHAIN_NAME})")
+
+
+def _load_cfg():
+    chain_ref = resolve_chain(CHAIN_NAME)
+    cfg = load_chain_cfg(chain_ref)
+    agents = cfg.get("agents", [])
+    return chain_ref, cfg, agents
 
 
 @app.get("/")
@@ -31,95 +28,74 @@ async def root():
 
 @app.get(f"/api/v1/{CHAIN_NAME}/health")
 async def health():
-    # We don't check the actual chain registry here; this micro-app is
-    # stateless and relies on the caller to pass the agents spec.
     return {"status": "ok", "chain": CHAIN_NAME}
 
 
 @app.post(f"/api/v1/{CHAIN_NAME}/run")
-async def run_chain(body: ChainRunBody = Body(...)):
+async def run_chain(payload: dict = Body(...)):
     """
-    Stateless chain runner.
-
-    Caller must send:
-      {
-        "agents": [ { "agent_name": ..., "path": "/api/v1/agents/...", "inputs": [...], ... }, ... ],
-        "payload": { ... }  # root payload for first agent
-      }
-
-    We execute the sequence locally using treehopper._run_agent_path.
+    Body format must match main server:
+      { "file_path": "...", ... }
     """
-    agents_spec = body.agents or []
-    payload = body.payload or {}
-
-    if not agents_spec:
-        raise HTTPException(
-            status_code=400, detail="No agents provided in 'agents' list"
-        )
+    chain_ref, cfg, agents = _load_cfg()
+    if not agents:
+        raise HTTPException(status_code=400, detail="No agents in chain")
 
     results: List[Dict[str, Any]] = []
-    prev_output: Dict[str, Any] | None = None
+    prev_output = None
 
-    for idx, step in enumerate(agents_spec):
-        path = step.get("path")
+    for idx, step in enumerate(agents):
+        path = step["path"]
         inputs = step.get("inputs", [])
-        agent_name = step.get("agent_name")
 
-        if not path:
-            raise HTTPException(
-                status_code=400, detail=f"Missing 'path' for step index {idx}"
-            )
-
-        # Build params for this step
         if idx == 0:
-            # First step: params from root payload
-            if inputs:
-                params: Dict[str, Any] = {}
-                for inp in inputs:
-                    key = inp.get("name")
-                    if key and key in payload:
-                        params[key] = payload[key]
-            else:
-                params = dict(payload)
+            params = {}
+            for inp in inputs:
+                k = inp.get("name")
+                if k not in payload:
+                    missing_inputs = [
+                        k for k in [i["name"] for i in inputs] if k not in payload
+                    ]
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Missing required input(s) for first step '{step['agent_name']}': "
+                            f"{missing_inputs}"
+                        ),
+                    )
+                params[k] = payload[k]
         else:
             params = {}
-            if prev_output is not None and isinstance(prev_output, dict):
-                if inputs:
-                    for inp in inputs:
-                        key = inp.get("name")
-                        if key and key in prev_output:
-                            params[key] = prev_output[key]
-                else:
-                    params = dict(prev_output)
+            if isinstance(prev_output, dict):
+                for inp in inputs:
+                    k = inp.get("name")
+                    if k in prev_output:
+                        params[k] = prev_output[k]
 
         try:
-            result = await _run_agent_path(path, params)
-        except HTTPException as e:
-            # structured failure response including partial results
-            results.append({"error": e.detail if hasattr(e, "detail") else str(e)})
-            return {
-                "success": False,
-                "failed_step": idx,
-                "failed_agent": agent_name,
-                "executed_at": datetime.utcnow().isoformat() + "Z",
-                "results": results,
-            }
+            out = await _run_agent_path(path, params)
         except Exception as e:
             results.append({"error": str(e)})
             return {
                 "success": False,
                 "failed_step": idx,
-                "failed_agent": agent_name,
+                "failed_agent": step.get("agent_name"),
                 "executed_at": datetime.utcnow().isoformat() + "Z",
                 "results": results,
+                "detached": True,
             }
 
-        results.append(result)
-        prev_output = result if isinstance(result, dict) else {"result": result}
+        results.append(out)
+        prev_output = out
 
-    return {
-        "success": True,
+    history = {
         "chain_name": CHAIN_NAME,
         "executed_at": datetime.utcnow().isoformat() + "Z",
+        "input": payload,
         "results": results,
+        "detached": True,
     }
+    (chain_ref.dir_path / "last_run.json").write_text(
+        json.dumps(history, indent=2), encoding="utf-8"
+    )
+    return history
