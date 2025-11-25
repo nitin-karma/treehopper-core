@@ -17,7 +17,8 @@ from dotenv import load_dotenv
 import chromadb
 from typing import Any
 import yaml
-from datetime import datetime
+
+# from datetime import datetime
 
 # from chromadb import Client
 # from chromadb.config import Settings
@@ -26,6 +27,11 @@ from datetime import datetime
 # from chromadb.utils import embedding_functions
 from pydantic import BaseModel
 from typing import List, Dict
+from treehopper.utils.run_registry import (
+    record_chain_run,
+    list_chain_runs as rr_list_chain_runs,
+    get_chain_run as rr_get_chain_run,
+)
 
 # if True:  # temporary debug
 #     print("\n================= PYTEST ENV DEBUG (IMPORT TIME) =================")
@@ -273,7 +279,14 @@ async def list_chains():
 
 @router_chains.post("/{chain_name}")
 async def run_chain_endpoint(chain_name: str, payload: dict | None = None):
-    detached = False
+    """
+    Main-server chain runner.
+
+    Semantics:
+      - First agent gets the root payload (validated against its declared inputs).
+      - Subsequent agents get params mapped from previous step's output.
+      - Full run is recorded via run_registry (last_run + runs/<run_id>.json).
+    """
     cfg, chain_dir = resolve_chain_by_name(chain_name)
     agents_cfg = cfg.get("agents", [])
 
@@ -282,9 +295,9 @@ async def run_chain_endpoint(chain_name: str, payload: dict | None = None):
             status_code=400, detail=f"Chain has no agents: {chain_name}"
         )
 
-    results = []
-    prev_output = None
-    root_payload = payload or {}
+    results: list[Any] = []
+    prev_output: dict[str, Any] | None = None
+    root_payload: dict[str, Any] = payload or {}
 
     for idx, step in enumerate(agents_cfg):
         # Validate FIRST STEP required inputs exist
@@ -294,12 +307,15 @@ async def run_chain_endpoint(chain_name: str, payload: dict | None = None):
             if missing:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Missing required input(s) for first step '{step.get('agent_name')}': {missing}",
+                    detail=(
+                        f"Missing required input(s) for first step "
+                        f"'{step.get('agent_name')}': {missing}"
+                    ),
                 )
 
         # Build params for execution
         if idx == 0:
-            params = root_payload
+            params: dict[str, Any] = dict(root_payload)
         else:
             params = {}
             for inp in step.get("inputs", []):
@@ -309,21 +325,45 @@ async def run_chain_endpoint(chain_name: str, payload: dict | None = None):
 
         result = await _execute_agent_step(step["path"], params)
         results.append(result)
-        prev_output = result
+        prev_output = result if isinstance(result, dict) else {"result": result}
 
-    history = {
-        "chain_name": cfg.get("chain_name"),
-        "chain_id": cfg.get("chain_id"),
-        "executed_at": datetime.utcnow().isoformat() + "Z",
-        "input": payload or {},
-        "results": results,
-        "detached": detached,
-    }
-    (chain_dir / "last_run.json").write_text(
-        json.dumps(history, indent=2), encoding="utf-8"
+    # delegate persistence to run_registry (also writes last_run.json)
+    history = record_chain_run(
+        chain_name=cfg.get("chain_name", chain_name),
+        chain_id=cfg.get("chain_id"),
+        chain_dir=chain_dir,
+        payload=root_payload,
+        results=results,
+        detached=False,
+        success=True,
     )
-
     return history
+
+
+@router_chains.get("/{chain_name}/runs")
+async def list_chain_runs(chain_name: str, limit: int = 50):
+    """
+    List recent runs for a chain (summary).
+    """
+    cfg, chain_dir = resolve_chain_by_name(chain_name)
+    runs = rr_list_chain_runs(chain_dir, limit=limit)
+    return {
+        "chain_name": cfg.get("chain_name", chain_name),
+        "chain_id": cfg.get("chain_id"),
+        "runs": runs,
+    }
+
+
+@router_chains.get("/{chain_name}/runs/{run_id}")
+async def get_chain_run(chain_name: str, run_id: str):
+    """
+    Fetch a single run (full JSON).
+    """
+    _, chain_dir = resolve_chain_by_name(chain_name)
+    data = rr_get_chain_run(chain_dir, run_id)
+    if not data:
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+    return data
 
 
 def _normalize_agent_path(path: str) -> str:

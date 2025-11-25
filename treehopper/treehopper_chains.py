@@ -434,7 +434,7 @@ def chain_run_detached(
     The micro-app is treehopper.chain_runtime_app:app
     and is stateless: each call must send {agents, payload}.
     """
-    detached = True
+    # detached = True
     cfg = load_chain_cfg(chain_ref)
 
     # Either derive or honor explicit port
@@ -474,6 +474,8 @@ def chain_run_detached(
         env = os.environ.copy()
         env["PROD"] = "1"
         env["CHAIN_NAME"] = chain_ref.chain_name
+        env["CHAIN_ID"] = chain_ref.chain_id
+        env["CHAIN_DIR"] = str(chain_ref.dir_path)
 
         LOG_FILE = (
             RUNTIME_DIR / f"chain_{chain_ref.chain_name}-{chain_ref.chain_id}.log"
@@ -546,21 +548,9 @@ def chain_run_detached(
             status = f"✗ error: {res['error']}"
         print(f"  [{name}] {status}")
 
-    # For detached micro-app: CLI writes last_run.json itself
-    history_path = chain_ref.dir_path / "last_run.json"
-    history = {
-        "chain_name": cfg.get("chain_name"),
-        "chain_id": cfg.get("chain_id"),
-        "executed_at": datetime.utcnow().isoformat() + "Z",
-        "input": payload or {},
-        "results": results,
-        "detached": detached,
-    }
-    history_path.write_text(json.dumps(history, indent=2), encoding="utf-8")
-
-    print("\n🔍 Full response stored at:")
-    print(f"{history_path}")
-    print(f"🌐 Chain micro-app runtime still available at: {chain_url}")
+    print("🌐 Chain runtime is ready on", chain_url)
+    print(f"📌 POST {chain_url}/api/v1/{chain_ref.chain_name}/run")
+    print(f"🔍 Health {chain_url}/api/v1/{chain_ref.chain_name}/health")
 
 
 # -----------------------------------------------------------------------------

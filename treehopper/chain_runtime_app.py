@@ -1,101 +1,158 @@
+# chain_runtime_app.py
 import os
-import json
-from datetime import datetime
-from typing import Any, Dict, List
+
+# import json
+# from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, cast
 
 from fastapi import FastAPI, Body, HTTPException
-from treehopper.treehopper import _run_agent_path, VERSION
-from treehopper.treehopper_chains import load_chain_cfg, resolve_chain
 
-CHAIN_NAME = os.getenv("CHAIN_NAME")
+# from pydantic import BaseModel
+
+from treehopper.treehopper import _run_agent_path, VERSION
+from treehopper.utils.run_registry import record_chain_run
+
+import yaml
+
+CHAIN_NAME = cast(str, os.getenv("CHAIN_NAME"))
+CHAIN_ID = os.getenv("CHAIN_ID")
+CHAIN_DIR_ENV = os.getenv("CHAIN_DIR")
+
 if not CHAIN_NAME:
-    raise RuntimeError("CHAIN_NAME environment variable required")
+    raise RuntimeError(
+        "CHAIN_NAME environment variable is required for chain runtime. "
+        "Example: CHAIN_NAME=exec_summ uvicorn treehopper.chain_runtime_app:app ..."
+    )
+
+CHAIN_DIR: Path | None = None
+CHAIN_CFG: Dict[str, Any] = {}
+
+if CHAIN_DIR_ENV:
+    CHAIN_DIR = Path(CHAIN_DIR_ENV)
+    cfg_path = CHAIN_DIR / "chain.yaml"
+    if not cfg_path.exists():
+        raise RuntimeError(f"chain.yaml not found at {cfg_path}")
+    try:
+        CHAIN_CFG = yaml.safe_load(cfg_path.read_text())
+    except Exception as e:
+        raise RuntimeError(f"Failed to read chain.yaml: {e}") from e
+else:
+    # still allow running for debugging, but without persistence
+    CHAIN_CFG = {"chain_name": CHAIN_NAME, "agents": []}
+
 
 app = FastAPI(title=f"Treehopper v{VERSION} Chain Runtime ({CHAIN_NAME})")
 
 
-def _load_cfg():
-    chain_ref = resolve_chain(CHAIN_NAME)
-    cfg = load_chain_cfg(chain_ref)
-    agents = cfg.get("agents", [])
-    return chain_ref, cfg, agents
-
-
 @app.get("/")
 async def root():
-    return {"status": "ok", "runtime": "chain", "chain": CHAIN_NAME}
+    return {
+        "status": "ok",
+        "runtime": "chain",
+        "chain": CHAIN_NAME,
+        "chain_id": CHAIN_ID,
+    }
 
 
 @app.get(f"/api/v1/{CHAIN_NAME}/health")
 async def health():
-    return {"status": "ok", "chain": CHAIN_NAME}
+    return {"status": "ok", "chain": CHAIN_NAME, "chain_id": CHAIN_ID}
 
 
 @app.post(f"/api/v1/{CHAIN_NAME}/run")
-async def run_chain(payload: dict = Body(...)):
+async def run_chain(payload: dict = Body(default={})):
     """
-    Body format must match main server:
-      { "file_path": "...", ... }
+    Micro-app chain runner.
+
+    Behaves like main server's /api/v1/chains/{name}:
+      - Accepts a JSON payload (e.g. {"file_path": "..."}).
+      - Uses chain.yaml's agents list for execution order.
+      - Records run via run_registry (detached=True).
     """
-    chain_ref, cfg, agents = _load_cfg()
-    if not agents:
-        raise HTTPException(status_code=400, detail="No agents in chain")
+    agents_spec: List[Dict[str, Any]] = CHAIN_CFG.get("agents", [])
+    if not agents_spec:
+        raise HTTPException(status_code=400, detail="Chain has no agents configured")
 
-    results: List[Dict[str, Any]] = []
-    prev_output = None
+    root_payload: Dict[str, Any] = payload or {}
+    results: List[Any] = []
+    prev_output: Dict[str, Any] | None = None
 
-    for idx, step in enumerate(agents):
-        path = step["path"]
+    # First-step validation
+    first = agents_spec[0]
+    declared = [i.get("name") for i in first.get("inputs", []) if i.get("name")]
+    missing = [d for d in declared if d not in root_payload]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Missing required input(s) for first step "
+                f"'{first.get('agent_name')}': {missing}"
+            ),
+        )
+
+    for idx, step in enumerate(agents_spec):
+        path = step.get("path")
         inputs = step.get("inputs", [])
+        agent_name = step.get("agent_name")
 
+        if not path:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing 'path' for step {idx} (agent: {agent_name})",
+            )
+
+        # Build params for this step
         if idx == 0:
-            params = {}
-            for inp in inputs:
-                k = inp.get("name")
-                if k not in payload:
-                    missing_inputs = [
-                        k for k in [i["name"] for i in inputs] if k not in payload
-                    ]
-                    raise HTTPException(
-                        status_code=400,
-                        detail=(
-                            f"Missing required input(s) for first step '{step['agent_name']}': "
-                            f"{missing_inputs}"
-                        ),
-                    )
-                params[k] = payload[k]
+            params: Dict[str, Any] = dict(root_payload)
         else:
             params = {}
-            if isinstance(prev_output, dict):
-                for inp in inputs:
-                    k = inp.get("name")
-                    if k in prev_output:
-                        params[k] = prev_output[k]
+            if prev_output is not None and isinstance(prev_output, dict):
+                if inputs:
+                    for inp in inputs:
+                        key = inp.get("name")
+                        if key and key in prev_output:
+                            params[key] = prev_output[key]
+                else:
+                    params = dict(prev_output)
 
         try:
-            out = await _run_agent_path(path, params)
+            result = await _run_agent_path(path, params)
+        except HTTPException as e:
+            # treat as failed run, but still record it
+            history = record_chain_run(
+                chain_name=CHAIN_NAME,
+                chain_id=CHAIN_ID,
+                chain_dir=CHAIN_DIR,
+                payload=root_payload,
+                results=results
+                + [{"error": e.detail if hasattr(e, "detail") else str(e)}],
+                detached=True,
+                success=False,
+            )
+            return history
         except Exception as e:
-            results.append({"error": str(e)})
-            return {
-                "success": False,
-                "failed_step": idx,
-                "failed_agent": step.get("agent_name"),
-                "executed_at": datetime.utcnow().isoformat() + "Z",
-                "results": results,
-                "detached": True,
-            }
+            history = record_chain_run(
+                chain_name=CHAIN_NAME,
+                chain_id=CHAIN_ID,
+                chain_dir=CHAIN_DIR,
+                payload=root_payload,
+                results=results + [{"error": str(e)}],
+                detached=True,
+                success=False,
+            )
+            return history
 
-        results.append(out)
-        prev_output = out
+        results.append(result)
+        prev_output = result if isinstance(result, dict) else {"result": result}
 
-    history = {
-        "chain_name": CHAIN_NAME,
-        "executed_at": datetime.utcnow().isoformat() + "Z",
-        "input": payload,
-        "results": results,
-        "detached": True,
-    }
-    (chain_ref.dir_path / "last_run.json").write_text(
-        json.dumps(history, indent=2), encoding="utf-8"
+    history = record_chain_run(
+        chain_name=CHAIN_NAME,
+        chain_id=CHAIN_ID,
+        chain_dir=CHAIN_DIR,
+        payload=root_payload,
+        results=results,
+        detached=True,
+        success=True,
     )
     return history
