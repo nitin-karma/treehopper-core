@@ -3,8 +3,12 @@ from typing import Any, Dict
 
 from fastapi import FastAPI, Body, HTTPException
 from fastapi.responses import JSONResponse
-
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from treehopper.treehopper import _run_agent_path, VERSION
+
+# from treehopper.utils.ui_assets import inject_branding
+from fastapi.openapi.docs import get_swagger_ui_html
 
 AGENT_NAME = os.getenv("AGENT_NAME")
 
@@ -15,6 +19,30 @@ if not AGENT_NAME:
     )
 
 app = FastAPI(title=f"Treehopper v{VERSION} Agent Runtime ({AGENT_NAME})")
+
+
+# __file__ is treehopper/agent_runtime_app.py
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+STATIC_DIR = os.path.abspath(STATIC_DIR)
+
+if os.path.isdir(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+# inject_branding(app, f"Agent Runtime: {AGENT_NAME}")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return FileResponse(os.path.join(STATIC_DIR, "treehopper_favicon.png"))
+
+
+@app.get("/docs", include_in_schema=False)
+async def custom_docs():
+    return get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=app.title,
+        swagger_favicon_url="/static/treehopper_favicon.png",
+    )
 
 
 @app.get("/")

@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any, Dict, List, cast
 
 from fastapi import FastAPI, Body, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 # from pydantic import BaseModel
 
@@ -14,6 +16,9 @@ from treehopper.treehopper import _run_agent_path, VERSION
 from treehopper.utils.run_registry import record_chain_run
 
 import yaml
+from fastapi.openapi.docs import get_swagger_ui_html
+
+# from treehopper.utils.ui_assets import inject_branding
 
 CHAIN_NAME = cast(str, os.getenv("CHAIN_NAME"))
 CHAIN_ID = os.getenv("CHAIN_ID")
@@ -43,6 +48,29 @@ else:
 
 
 app = FastAPI(title=f"Treehopper v{VERSION} Chain Runtime ({CHAIN_NAME})")
+
+# __file__ is treehopper/chain_runtime_app.py
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+STATIC_DIR = os.path.abspath(STATIC_DIR)  # normalize to absolute path
+
+if os.path.isdir(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+# inject_branding(app, f"Agent Runtime: {AGENT_NAME}")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return FileResponse(os.path.join(STATIC_DIR, "treehopper_favicon.png"))
+
+
+@app.get("/docs", include_in_schema=False)
+async def custom_docs():
+    return get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=app.title,
+        swagger_favicon_url="/static/treehopper_favicon.png",
+    )
 
 
 @app.get("/")
