@@ -51,7 +51,7 @@ app = FastAPI(title=f"Treehopper v{VERSION} Chain Runtime ({CHAIN_NAME})")
 
 # __file__ is treehopper/chain_runtime_app.py
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
-STATIC_DIR = os.path.abspath(STATIC_DIR)  # normalize to absolute path
+# STATIC_DIR = os.path.abspath(STATIC_DIR)  # normalize to absolute path
 
 if os.path.isdir(STATIC_DIR):
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -61,7 +61,7 @@ if os.path.isdir(STATIC_DIR):
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
-    return FileResponse(os.path.join(STATIC_DIR, "treehopper_favicon.png"))
+    return FileResponse(os.path.join(STATIC_DIR, "treehopper_favicon.ico"))
 
 
 @app.get("/docs", include_in_schema=False)
@@ -69,7 +69,9 @@ async def custom_docs():
     return get_swagger_ui_html(
         openapi_url=app.openapi_url,
         title=app.title,
-        swagger_favicon_url="/static/treehopper_favicon.png",
+        swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
+        swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
+        favicon_url="/static/treehopper_favicon.ico",
     )
 
 

@@ -128,14 +128,34 @@ def read_pid(path: Path) -> Optional[int]:
     if not path.exists():
         return None
     try:
-        return int(path.read_text().strip())
+        text = path.read_text().strip()
+        if ":" in text:
+            pid_str, _ = text.split(":", 1)
+            return int(pid_str)
+        return int(text)
     except Exception:
         return None
 
 
-def write_pid(path: Path, pid: int) -> None:
+def read_pid_and_port(path: Path) -> tuple[Optional[int], Optional[int]]:
+    if not path.exists():
+        return None, None
+    try:
+        text = path.read_text().strip()
+        if ":" in text:
+            pid_str, port_str = text.split(":", 1)
+            return int(pid_str), int(port_str)
+        return int(text), None
+    except Exception:
+        return None, None
+
+
+def write_pid(path: Path, pid: int, port: int | None = None) -> None:
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-    path.write_text(str(pid))
+    if port is not None:
+        path.write_text(f"{pid}:{port}")
+    else:
+        path.write_text(str(pid))
 
 
 def kill_pid(pid: int) -> None:
@@ -428,49 +448,62 @@ def chain_run_detached(
     run_once: bool = True,
 ) -> None:
     """
-    Start a dedicated uvicorn *chain micro-app* for this chain on a predictable port,
-    then execute the chain once via its /api/v1/<chain_name>/run endpoint.
-
-    The micro-app is treehopper.chain_runtime_app:app
-    and is stateless: each call must send {agents, payload}.
+    FINAL IMPLEMENTATION:
+      • One runtime per chain_id
+      • pid file stores pid:port
+      • If runtime exists → reuse EXACT port (never compute)
+      • If new runtime → save pid:port
+      • Micro-app writes run history; CLI only prints
+      • If run_once=True → auto-stop runtime after executing
     """
-    # detached = True
+
     cfg = load_chain_cfg(chain_ref)
+    derived_port = derive_chain_port(chain_ref.chain_id)
 
-    # Either derive or honor explicit port
-    port = (
-        port_override
-        if port_override is not None
-        else derive_chain_port(chain_ref.chain_id)
-    )
+    # explicit port > derived port
+    intended_port = port_override or derived_port
 
-    # Strict mode: if explicit port is in use → error and exit
-    if port_override is not None and is_port_in_use(port):
-        print(f"❌ Port {port} is already in use. Choose a different port.")
+    # strict: explicit --port cannot be in use
+    if port_override is not None and is_port_in_use(intended_port):
+        print(f"❌ Port {intended_port} is already in use.")
         sys.exit(1)
 
-    chain_url = f"http://localhost:{port}"
     pid_file = RUNTIME_DIR / f"{CHAIN_PID_PREFIX}{chain_ref.chain_id}.pid"
 
-    # If already running, reuse it
-    existing_pid = read_pid(pid_file)
+    # -------- Read existing pid + port --------
+    existing_pid, existing_port = read_pid_and_port(pid_file)
+
+    actual_port: int
+    started_proc = None
+
     if existing_pid:
         try:
-            os.kill(existing_pid, 0)
+            os.kill(existing_pid, 0)  # check alive
+            # ✔️ ALWAYS use actual running port, not derived
+            actual_port = existing_port or derived_port
+
+            chain_url = f"http://localhost:{actual_port}"
             print(
                 f"ℹ️ Chain runtime already running for '{chain_ref.chain_name}' "
                 f"(PID {existing_pid}) on {chain_url}"
             )
             print(f"📌 POST   {chain_url}/api/v1/{chain_ref.chain_name}/run")
             print(f"🔍 Health {chain_url}/api/v1/{chain_ref.chain_name}/health")
+
         except ProcessLookupError:
+            # pid dead → delete stale file
             pid_file.unlink(missing_ok=True)
             existing_pid = None
 
+    # -------- Start new runtime if not running --------
     if not existing_pid:
+        actual_port = intended_port
+        chain_url = f"http://localhost:{actual_port}"
+
         print(
             f"🚀 Starting dedicated chain runtime for '{chain_ref.chain_name}' on {chain_url}"
         )
+
         env = os.environ.copy()
         env["PROD"] = "1"
         env["CHAIN_NAME"] = chain_ref.chain_name
@@ -488,22 +521,25 @@ def chain_run_detached(
                 "--host",
                 "0.0.0.0",
                 "--port",
-                str(port),
+                str(actual_port),
             ],
             env=env,
             stdout=open(LOG_FILE, "w"),
             stderr=subprocess.STDOUT,
         )
-        write_pid(pid_file, proc.pid)
+        started_proc = proc
+
+        write_pid(pid_file, proc.pid, actual_port)
 
         print(f"📝 Chain runtime logs → {LOG_FILE}")
 
-        # wait for /health
+        # wait for health
         for _ in range(40):
             time.sleep(0.25)
             try:
                 r = requests.get(
-                    f"{chain_url}/api/v1/{chain_ref.chain_name}/health", timeout=0.25
+                    f"{chain_url}/api/v1/{chain_ref.chain_name}/health",
+                    timeout=0.25,
                 )
                 if r.status_code == 200:
                     print("✅ Chain micro-app runtime healthy")
@@ -511,46 +547,57 @@ def chain_run_detached(
             except Exception:
                 continue
         else:
-            print("⚠️ Chain micro-app did not report healthy; continuing anyway.")
-    if not run_once:
-        print(f"🌐 Chain runtime is ready on {chain_url}")
-        print(f"📌 POST {chain_url}/api/v1/{chain_ref.chain_name}/run")
-        print(f"🔍 Health {chain_url}/api/v1/{chain_ref.chain_name}/health")
-        return
+            print("⚠️ Chain micro-app did not report healthy.")
 
-    # Prepare request body for micro-app
-    body = payload or {}
-
-    url = f"{chain_url}/api/v1/{chain_ref.chain_name}/run"
+    # -------- Post payload to actual running port --------
+    url = f"http://localhost:{actual_port}/api/v1/{chain_ref.chain_name}/run"
     print(f"▶ Executing chain via {url}")
-    r = requests.post(url, json=body, headers=API_KEY)
+
+    r = requests.post(url, json=(payload or {}), headers=API_KEY)
 
     try:
         data = r.json()
     except Exception:
         print(f"HTTP {r.status_code}")
         print(r.text)
+
+        if started_proc and run_once:
+            kill_pid(started_proc.pid)
+            pid_file.unlink(missing_ok=True)
         return
 
     if r.status_code != 200:
         print(f"HTTP {r.status_code}")
         print(data)
+
+        if started_proc and run_once:
+            kill_pid(started_proc.pid)
+            pid_file.unlink(missing_ok=True)
         return
 
+    # -------- Print results (history already written by micro-app) --------
     results = data.get("results", [])
-    agents = cfg.get("agents", [])
+    run_id = data.get("run_id")
 
+    agents = cfg.get("agents", [])
     print("📊 Chain step results:")
     for i, res in enumerate(results):
         name = agents[i]["agent_name"] if i < len(agents) else f"step_{i}"
-        status = "✓ success"
-        if isinstance(res, dict) and "error" in res:
-            status = f"✗ error: {res['error']}"
+        status = "✓ success" if "error" not in res else f"✗ error: {res['error']}"
         print(f"  [{name}] {status}")
 
-    print("🌐 Chain runtime is ready on", chain_url)
-    print(f"📌 POST {chain_url}/api/v1/{chain_ref.chain_name}/run")
-    print(f"🔍 Health {chain_url}/api/v1/{chain_ref.chain_name}/health")
+    print("\n🔍 Run stored by micro-app:")
+    print(f"  run_id = {run_id}")
+
+    print(
+        f"🌐 Chain micro-app runtime still available at: http://localhost:{actual_port}"
+    )
+
+    # -------- Stop if run_once=True --------
+    if run_once and started_proc:
+        kill_pid(started_proc.pid)
+        pid_file.unlink(missing_ok=True)
+        print(f"ℹ️ Chain micro-app stopped after run (PID {started_proc.pid})")
 
 
 # -----------------------------------------------------------------------------
@@ -698,8 +745,8 @@ def chain_entry(argv: List[str]) -> None:
 
     sub = argv[0]
 
-    # new subcommand mode
     if sub in {"build", "run", "stop", "delete", "logs", "help"}:
+
         if sub == "help":
             print_chain_help()
             return
@@ -716,9 +763,7 @@ def chain_entry(argv: List[str]) -> None:
         if sub == "run":
             if len(argv) < 2:
                 print(
-                    "Usage: treehopper chain run <name|id> "
-                    "[--payload '{...}'] [--payload-file path] "
-                    "[--detached] [--port <port>] [--bg]"
+                    "Usage: treehopper chain run <name|id> [--payload ...] [--detached] [--port X] [--bg]"
                 )
                 sys.exit(1)
 
@@ -727,15 +772,16 @@ def chain_entry(argv: List[str]) -> None:
             extra_args = parsed["args"]
             payload = parsed["payload"]
 
-            # ---- detect flags in correct order ----
+            # 1) detect detached
             detached = "--detached" in extra_args
             extra_args = [a for a in extra_args if a != "--detached"]
 
-            bg = "--bg" in extra_args  # run micro-app only (no auto exec)
+            # 2) detect bg (run-only)
+            bg = "--bg" in extra_args
             extra_args = [a for a in extra_args if a != "--bg"]
 
-            # ---- detect --port before unrecognized check ----
-            port_override: int | None = None
+            # 3) detect --port <value>
+            port_override = None
             if "--port" in extra_args:
                 idx = extra_args.index("--port")
                 if idx + 1 >= len(extra_args):
@@ -748,18 +794,18 @@ def chain_entry(argv: List[str]) -> None:
                     sys.exit(1)
                 del extra_args[idx : idx + 2]
 
-            # ---- warn for any remaining flags ----
+            # 4) unrecognized args check
             if extra_args:
                 print(f"⚠️ Ignoring unrecognized args: {extra_args}")
 
-            # ---- execute ----
             chain_ref = resolve_chain(ref)
+
             if detached:
                 chain_run_detached(
                     chain_ref,
                     payload,
                     port_override=port_override,
-                    run_once=not bg,  # TRUE → run immediately, FALSE → micro-app only
+                    run_once=not bg,
                 )
             else:
                 chain_run_local(chain_ref, payload)
@@ -786,5 +832,5 @@ def chain_entry(argv: List[str]) -> None:
             chain_logs(argv[1])
             return
 
-    # ---- legacy mode: treat all args as direct agent paths ----
+    # fall back → legacy mode
     simple_chain_run(argv)

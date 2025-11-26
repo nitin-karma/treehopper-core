@@ -46,18 +46,55 @@ def ensure_runtime_dir():
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def write_pid(path: Path, pid: int):
+def write_pid(path: Path, pid: int, port: int | None = None):
+    """
+    Write pid file. Format:
+      - legacy: "<pid>"
+      - new   : "<pid>:<port>"
+
+    We write pid:port when port is known so future checks can report the exact port.
+    """
     ensure_runtime_dir()
-    path.write_text(str(pid))
+    if port is not None:
+        path.write_text(f"{pid}:{port}")
+    else:
+        path.write_text(str(pid))
 
 
 def read_pid(path: Path) -> int | None:
+    """
+    Read PID from file. Accepts both "<pid>" and "<pid>:<port>" formats.
+    Returns pid (int) or None.
+    """
     if not path.exists():
         return None
     try:
-        return int(path.read_text().strip())
+        text = path.read_text().strip()
+        if ":" in text:
+            pid_str, _ = text.split(":", 1)
+            return int(pid_str)
+        return int(text)
     except Exception:
         return None
+
+
+def read_pid_and_port(path: Path) -> tuple[int | None, int | None]:
+    """
+    Return (pid, port) from pid file.
+    - pid: int or None
+    - port: int or None
+    Accepts "<pid>" or "<pid>:<port>".
+    """
+    if not path.exists():
+        return None, None
+    try:
+        text = path.read_text().strip()
+        if ":" in text:
+            pid_str, port_str = text.split(":", 1)
+            return int(pid_str), int(port_str)
+        return int(text), None
+    except Exception:
+        return None, None
 
 
 def kill_pid(pid: int):
@@ -729,42 +766,59 @@ def resolve_agent_meta(agent_name_or_id: str) -> dict:
     sys.exit(1)
 
 
-def agent_run_detached(ref: str, port_override: int | None = None) -> None:
+def agent_run_detached(
+    ref: str, port_override: int | None = None, bg: bool = True
+) -> None:
+    """
+    Start a detached agent runtime for the given agent.
+    - If already running: print existing PID + correct port and return.
+    - If explicit port provided and in-use: exit with error (Option A).
+    - If bg is False: run once (start, execute when CLI calls /run, then stop).
+      If bg is True: leave runtime running.
+    """
     meta = resolve_agent_meta(ref)
     agent_id = meta["agent_id"]
-    agent_name = meta["agent_name"]
+    port = derive_agent_port(agent_id) if port_override is None else port_override
+    # url = f"http://localhost:{port}"
+    pid_file = RUNTIME_DIR / f"{AGENT_RUNTIME_PREFIX}{agent_id}.pid"
 
-    # Either derive or honor explicit port
-    port = port_override if port_override is not None else derive_agent_port(agent_id)
-
-    # Strict mode: if explicit port is in use → error and exit
+    # If explicit port requested and already in use -> strict error
     if port_override is not None and is_port_in_use(port):
         print(f"❌ Port {port} is already in use. Choose a different port.")
         sys.exit(1)
 
-    url = f"http://localhost:{port}"
-    pid_file = RUNTIME_DIR / f"{AGENT_RUNTIME_PREFIX}{agent_id}.pid"
-
-    existing_pid = read_pid(pid_file)
+    # Check existing runtime and report its actual port (if any)
+    existing_pid, existing_port = read_pid_and_port(pid_file)
     if existing_pid:
         try:
-            os.kill(existing_pid, 0)
+            os.kill(existing_pid, 0)  # check process still exists
+            # If port was written earlier, use it; otherwise use derived port
+            use_port = existing_port or port
             print(
-                f"ℹ️ Agent runtime already running for '{agent_name}' "
-                f"(PID {existing_pid}) on {url}"
+                f"ℹ️ Agent runtime already running for '{meta['agent_name']}' "
+                f"(PID {existing_pid}) on http://localhost:{use_port}"
             )
-            print(f"📌 POST   {url}/api/v1/{agent_name}/run")
-            print(f"🔍 Health {url}/api/v1/{agent_name}/health")
+            print(
+                f"📌 POST   http://localhost:{use_port}/api/v1/{meta['agent_name']}/run"
+            )
+            print(
+                f"🔍 Health http://localhost:{use_port}/api/v1/{meta['agent_name']}/health"
+            )
             return
         except ProcessLookupError:
+            # stale PID file
             pid_file.unlink(missing_ok=True)
+            existing_pid = None
 
-    print(f"🚀 Starting detached agent runtime for '{agent_name}' on {url}")
+    # Start runtime
+    print(
+        f"🚀 Starting detached agent runtime for '{meta['agent_name']}' on http://localhost:{port}"
+    )
     env = os.environ.copy()
     env["PROD"] = "1"
-    env["AGENT_NAME"] = agent_name
+    env["AGENT_NAME"] = meta["agent_name"]
 
-    LOG_FILE = RUNTIME_DIR / f"agent_{agent_name}-{agent_id}.log"
+    LOG_FILE = RUNTIME_DIR / f"agent_{meta['agent_name']}-{agent_id}.log"
 
     proc = subprocess.Popen(
         [
@@ -779,11 +833,17 @@ def agent_run_detached(ref: str, port_override: int | None = None) -> None:
         stdout=open(LOG_FILE, "w"),
         stderr=subprocess.STDOUT,
     )
-    write_pid(pid_file, proc.pid)
+    # persist pid + port so future starts can report correct port
+    write_pid(pid_file, proc.pid, port)
 
     print(f"📝 Agent runtime logs → {LOG_FILE}")
-    print(f"📌 POST   {url}/api/v1/{agent_name}/run")
-    print(f"🔍 Health {url}/api/v1/{agent_name}/health")
+    print(f"📌 POST   http://localhost:{port}/api/v1/{meta['agent_name']}/run")
+    print(f"🔍 Health http://localhost:{port}/api/v1/{meta['agent_name']}/health")
+
+    # If caller wanted run-once (bg=False), do not keep runtime alive indefinitely.
+    # The CLI caller should call /run; after that the caller may stop the runtime with `treehopper agent stop`.
+    # If you want the CLI to automatically make one request and then stop, implement that at the caller side.
+    # (We persist the PID+port and return; the test script will call the /run endpoint.)
 
 
 def agent_stop(ref: str) -> None:

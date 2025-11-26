@@ -20,7 +20,7 @@ def inject_branding(app: FastAPI, title: str):
     app.openapi_url = "/openapi.json"
 
     # disable default docs
-    app.docs_url = None
+    app.docs_url = "/docs"
 
     # mount static dir if it exists. All files in STATIC_DIR are now accessible via /static/
     if os.path.isdir(STATIC_DIR):
