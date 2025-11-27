@@ -9,7 +9,7 @@ from pathlib import Path
 import requests
 
 API_KEY = {"x-api-key": "demo-key-123"}
-BASE = "http://localhost:1560"
+BASE = "http://localhost:1567"
 
 
 def run_cmd(cmd: list[str]) -> subprocess.CompletedProcess:
@@ -36,10 +36,10 @@ def test_folder_agent_full_flow():
         r = run_cmd(["treehopper", "build", agent_name])
         assert r.returncode == 0
 
-        # # ---- 4) restart existing 1560 uvicorn so new agent is discovered
+        # # ---- 4) restart existing 1567 uvicorn so new agent is discovered
         env = os.environ.copy()
         # env["PROD"] = "1"                 # disable reload
-        # subprocess.run(["pkill", "-f", "uvicorn.*1560"], stderr=subprocess.DEVNULL)
+        # subprocess.run(["pkill", "-f", "uvicorn.*1567"], stderr=subprocess.DEVNULL)
         proc = subprocess.Popen(["treehopper", "run"], env=env)
         # ---- 4) restart server to discover new agent
         # r = run_cmd(["treehopper", "restart"])

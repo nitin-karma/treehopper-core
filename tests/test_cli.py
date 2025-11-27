@@ -17,7 +17,7 @@ def test_cli_run_agent():
     for _ in range(40):
         try:
             if (
-                requests.get("http://localhost:1560/api/v1/sys/health").status_code
+                requests.get("http://localhost:1567/api/v1/sys/health").status_code
                 == 200
             ):
                 break

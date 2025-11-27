@@ -13,20 +13,26 @@ from typing import Any, Dict, List, Optional
 import socket
 import requests
 import yaml
+import asyncio
+from treehopper.treehopper_cancellation import (
+    cancel_run_id,
+    cancel_chain_id,
+    cancel_batch,
+)
 
 from treehopper.utils.shared_files import (
     has_only_one_shared_file,
     get_the_only_shared_file,
 )
 from treehopper.treehopper_cli import get_or_create_subscription_id
-
+from treehopper.treehopper_parallel import parallel_chain_run_entry
 
 # -----------------------------------------------------------------------------
 # CONSTANTS & PATHS
 # -----------------------------------------------------------------------------
 
 API_KEY = {"x-api-key": "demo-key-123"}
-MAIN_PORT = int(os.getenv("TH_PORT", 1560))
+MAIN_PORT = int(os.getenv("TH_PORT", 1567))
 BASE_URL = f"http://localhost:{MAIN_PORT}"
 
 HOME = Path.home()
@@ -715,11 +721,46 @@ Treehopper Chain Commands
       Creates ~/.treehopper/registry/chains/<id>/chain.yaml
       and a POST endpoint /api/v1/chains/<name>.
 
-  treehopper chain run <name|id> [--payload '{...}'] [--payload-file path] [--detached] [--bg]
+  treehopper chain run <name|id>
+      [--payload '{...}'] [--payload-file path]
+      [--detached] [--bg]
+      [--parallel N] [--concurrency M]
+
       Execute a named chain via /api/v1/chains/{name}.
-      Payload (if provided) is passed only to the first agent.
-      --detached   : use dedicated chain micro-app
-      --bg         : (only with --detached) run micro-app logs in background → ~/.treehopper/runtime/chain_<id>.log
+      Payload (if provided) is passed only to the FIRST agent.
+
+      --detached
+            Run the chain using a dedicated chain micro-app (FastAPI + its own port).
+
+      --bg
+            Only valid with --detached. Starts the runtime in background and prints log file path.
+
+      --parallel N
+            Execute the SAME chain N times in parallel.
+            Each run receives its own run_id and is fully isolated.
+            ⚠ Note: parallelization is at the CHAIN level — steps inside a chain still run sequentially.
+
+      --concurrency M
+            Maximum number of chain runs executed at once (M <= parallel).
+            Useful to avoid provider rate-limits (OpenAI 429, etc.).
+            If omitted, concurrency defaults to N.
+
+      ⚠ SAFETY NOTES:
+          • Do NOT combine `--parallel` AND `--detached` unless you understand the behavior:
+                - Parallel mode = many FULL chain runs in parallel.
+                - Detached mode = spawns ONE dedicated runtime, so parallel runs share a single micro-app.
+          • Recommended for high-scale work:
+                --parallel N  (CLI-level parallelism)
+                --concurrency M  (throttling)
+                Avoid --detached unless debugging.
+
+  treehopper chain cancel <name|id> [--run-id RID | --all]
+      Cancel running chain executions.
+      --run-id RID   : cancel a specific running chain execution.
+      --all          : cancel all active executions of this chain.
+
+  treehopper chain cancel-batch <batch_id>
+      Cancel all runs inside a parallel batch.
 
 
   treehopper chain stop <name|id>
@@ -734,6 +775,7 @@ Treehopper Chain Commands
 Legacy:
   treehopper chain <agent_path1> <agent_path2> ...
       Direct call to /api/v1/dev/chain with static agent paths.
+
 """
     )
 
@@ -745,7 +787,16 @@ def chain_entry(argv: List[str]) -> None:
 
     sub = argv[0]
 
-    if sub in {"build", "run", "stop", "delete", "logs", "help"}:
+    if sub in {
+        "build",
+        "run",
+        "stop",
+        "delete",
+        "logs",
+        "help",
+        "cancel",
+        "cancel-batch",
+    }:
 
         if sub == "help":
             print_chain_help()
@@ -771,7 +822,6 @@ def chain_entry(argv: List[str]) -> None:
             parsed = parse_payload_args(argv[2:])
             extra_args = parsed["args"]
             payload = parsed["payload"]
-
             # 1) detect detached
             detached = "--detached" in extra_args
             extra_args = [a for a in extra_args if a != "--detached"]
@@ -793,6 +843,50 @@ def chain_entry(argv: List[str]) -> None:
                     print("❌ Invalid value for --port (must be integer)")
                     sys.exit(1)
                 del extra_args[idx : idx + 2]
+
+            # ----------------------------------------
+            # NEW: Parallel execution flags
+            # ----------------------------------------
+            parallel = 1
+            concurrency = None
+
+            # --parallel N
+            if "--parallel" in extra_args:
+                idx = extra_args.index("--parallel")
+                try:
+                    parallel = int(extra_args[idx + 1])
+                except Exception:
+                    print("❌ Invalid value for --parallel")
+                    sys.exit(1)
+                # remove flags from extra args
+                del extra_args[idx : idx + 2]
+
+            # --concurrency M
+            if "--concurrency" in extra_args:
+                idx = extra_args.index("--concurrency")
+                try:
+                    concurrency = int(extra_args[idx + 1])
+                except Exception:
+                    print("❌ Invalid value for --concurrency")
+                    sys.exit(1)
+                del extra_args[idx : idx + 2]
+
+            # default concurrency
+            if concurrency is None:
+                concurrency = parallel
+
+            # ----------------------------------------
+            # NEW: Parallel Execution Entry
+            # ----------------------------------------
+            if parallel > 1:
+                print(
+                    f"🌿 Parallel execution: {parallel} runs  | concurrency={concurrency} | detached={detached}"
+                )
+                # broadcast payload
+                payloads = [payload] * parallel
+
+                parallel_chain_run_entry(ref, payloads, parallel, concurrency, detached)
+                return
 
             # 4) unrecognized args check
             if extra_args:
@@ -830,6 +924,64 @@ def chain_entry(argv: List[str]) -> None:
                 print("Usage: treehopper chain logs <name|id>")
                 sys.exit(1)
             chain_logs(argv[1])
+            return
+
+        if sub == "cancel":
+
+            # Unified CLI syntax:
+            #   treehopper chain cancel --run <run_id>
+            #   treehopper chain cancel --batch <batch_id>
+            #   treehopper chain cancel --all <chain_name_or_id>
+
+            if "--run" in argv:
+                idx = argv.index("--run")
+                if idx + 1 >= len(argv):
+                    print("❌ Missing value for --run")
+                    sys.exit(1)
+                run_id = argv[idx + 1]
+                ok = asyncio.run(cancel_run_id(run_id))
+                print(
+                    "✅ Cancel requested"
+                    if ok
+                    else "⚠️ Run not found or already finished"
+                )
+                return
+
+            if "--batch" in argv:
+                idx = argv.index("--batch")
+                if idx + 1 >= len(argv):
+                    print("❌ Missing value for --batch")
+                    sys.exit(1)
+                batch_id = argv[idx + 1]
+                n = asyncio.run(cancel_batch(batch_id))
+                print(f"✅ Cancelled {n} run(s) in batch {batch_id}")
+                return
+
+            if "--all" in argv:
+                idx = argv.index("--all")
+                if idx + 1 >= len(argv):
+                    print("❌ Missing chain name/id for --all")
+                    sys.exit(1)
+                ref = argv[idx + 1]
+                chain_ref = resolve_chain(ref)
+                n = asyncio.run(cancel_chain_id(chain_ref.chain_id))
+                print(f"✅ Cancelled {n} run(s) for chain {chain_ref.chain_name}")
+                return
+
+            print(
+                "❌ Usage:\n  treehopper chain cancel --run <run_id>\n  treehopper chain cancel --batch <batch_id>\n  \
+                    treehopper chain cancel --all <chain>"
+            )
+            sys.exit(1)
+
+        if sub == "cancel-batch":
+            # Usage: treehopper chain cancel-batch <batch_id>
+            if len(argv) != 2:
+                print("Usage: treehopper chain cancel-batch <batch_id>")
+                sys.exit(1)
+            batch_id = argv[1]
+            n = asyncio.run(cancel_batch(batch_id))
+            print(f"✅ Cancelled {n} run(s) in batch {batch_id}")
             return
 
     # fall back → legacy mode

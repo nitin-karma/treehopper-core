@@ -1,7 +1,7 @@
 from pathlib import Path
 import requests
 
-BASE_URL = "http://localhost:1560"
+BASE_URL = "http://localhost:1567"
 API_KEY = {"x-api-key": "demo-key-123"}
 
 SAMPLE_TEXT_FILE = Path(__file__).parent / "chipset_report.txt"

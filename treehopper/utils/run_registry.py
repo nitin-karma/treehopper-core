@@ -18,8 +18,8 @@ def _now_iso() -> str:
     return datetime.utcnow().isoformat() + "Z"
 
 
-def _make_run_id(chain_name: str) -> str:
-    # simple, time-based ID: exec_summ-1732523456123
+def make_run_id(chain_name: str) -> str:
+    # public helper: time-based ID
     return f"{chain_name}-{int(time.time() * 1000)}"
 
 
@@ -37,17 +37,14 @@ def record_chain_run(
     results: List[Any],
     detached: bool,
     success: bool,
+    run_id: Optional[str] = None,
+    cancelled: bool = False,  # <-- NEW OPTIONAL FIELD
 ) -> Dict[str, Any]:
     """
-    Create a run record, write:
-      - <chain_dir>/last_run.json
-      - <chain_dir>/runs/<run_id>.json
-    and prune to last MAX_RUNS_PER_CHAIN.
-
-    Returns the run history dict (what the API can return).
+    Create a run record and write history files.
     """
     executed_at = _now_iso()
-    run_id = _make_run_id(chain_name)
+    run_id = run_id or make_run_id(chain_name)
 
     history: Dict[str, Any] = {
         "chain_name": chain_name,
@@ -60,6 +57,10 @@ def record_chain_run(
         "success": success,
     }
 
+    # NEW: Mark cancellation here
+    if cancelled:
+        history["cancelled"] = True
+
     if chain_dir is not None:
         runs_dir = _ensure_runs_dir(chain_dir)
 
@@ -68,11 +69,10 @@ def record_chain_run(
             json.dumps(history, indent=2), encoding="utf-8"
         )
 
-        # individual run file
+        # run file
         run_file = runs_dir / _make_run_filename(run_id)
         run_file.write_text(json.dumps(history, indent=2), encoding="utf-8")
 
-        # prune old runs
         _prune_runs(runs_dir)
 
     return history

@@ -1,4 +1,4 @@
-# handler.py
+# formatter/handler.py
 import os
 from pathlib import Path
 from fastapi import Body, HTTPException
@@ -8,15 +8,21 @@ from treehopper.treehopper_llm import call_llm
 from .schema import FormatterRequest
 from dotenv import load_dotenv
 
+# import asyncio
+
 load_dotenv()
 api_key = os.getenv("th_apikey")
+# allow overriding retries via env (optional)
+DEFAULT_LLM_RETRIES = int(os.getenv("TH_LLM_RETRIES", "5"))
 MAX_TEXT_FILE_SIZE = 200 * 1024  # 200 KB
 agent_name = "formatter"
 agent_id = get_agent_id(agent_name)
 
 
 class FormatterAgent:
-    async def run(self, doc_text: str, api_key: str | None) -> dict:
+    async def run(
+        self, doc_text: str, api_key: str | None, max_retries: int = DEFAULT_LLM_RETRIES
+    ) -> dict:
         prompt = f"""
 Sanitize the following text into a JSON-safe escaped string literal.
 Output ONLY the escaped string literal (no quotes around it).
@@ -24,13 +30,33 @@ Output ONLY the escaped string literal (no quotes around it).
 CONTENT:
 {doc_text}
 """
-        llm = await call_llm(prompt=prompt, api_key=api_key)
-        print(llm)
+        try:
+            llm = await call_llm(
+                prompt=prompt, api_key=api_key, max_retries=max_retries
+            )
+        except Exception as e:
+            # Unexpected error from call_llm (shouldn't happen), surface it
+            err = f"Handler LLM call unexpected exception: {e}"
+            print(err)
+            return {"formatted": f"[ERROR: {err}]"}
+
+        # For debugging/observability in logs:
+        print("formatter: llm response keys:", list(llm.keys()))
+
         if "error" in llm:
             error = (llm.get("error") or "").strip()
-            print({"formatted": error})
-            return {"formatted": ""}
+            # return explicit marker so tests/logs show failure reason
+            print(f"⚠️ Formatter LLM error: {error}")
+            return {"formatted": f"[ERROR: {error}]"}
+
         safe = (llm.get("message") or "").strip()
+        # if empty string, still return explicit empty but log tokens/latency
+        if safe == "":
+            latency = llm.get("latency")
+            tokens = llm.get("tokens")
+            print(
+                f"⚠️ Formatter returned empty message (latency={latency}, tokens={tokens})"
+            )
         return {"formatted": safe}
 
 
@@ -38,14 +64,12 @@ CONTENT:
     "formatter", method="POST", goal="Format raw document into JSON-safe escaped string"
 )
 async def handle(payload: FormatterRequest = Body(...)):
-    # 💡 FIX 1: Check if file_path is None before calling .strip()
     if payload.file_path is None:
         raise HTTPException(
             status_code=400, detail="The 'file_path' field is required in the payload."
         )
     file_path = payload.file_path.strip()
 
-    # Check for empty string after stripping
     if not file_path:
         raise HTTPException(
             status_code=400, detail="The 'file_path' field cannot be empty."
@@ -53,22 +77,18 @@ async def handle(payload: FormatterRequest = Body(...)):
 
     print(f"📩 Received file_path: {file_path}")
 
-    # 💡 FIX 2: Initialize resolved to None to satisfy type checker
-    resolved: Path | None = None  # Ensure it is defined with an explicit type
+    resolved: Path | None = None
 
-    # Case 1 — ABSOLUTE PATH
     abs_path = Path(file_path)
     if abs_path.is_absolute() and abs_path.exists():
         resolved = abs_path
     else:
-        # 💡 FIX 3: Ensure agent_id is available before using it in a Path
         if agent_id is None:
             raise HTTPException(
                 status_code=500,
                 detail="Agent ID is missing. Cannot resolve shared paths.",
             )
 
-        # Case 2 — SHARED RELATIVE (shared/<id>/files/...)
         shared_base = (
             Path.home() / ".treehopper" / "registry" / "shared" / agent_id / "files"
         )
@@ -76,7 +96,6 @@ async def handle(payload: FormatterRequest = Body(...)):
         if rel_attempt.exists():
             resolved = rel_attempt
         else:
-            # Case 3 — just filename (test.txt)
             fname_attempt = shared_base / Path(file_path).name
             if fname_attempt.exists():
                 resolved = fname_attempt
@@ -85,7 +104,6 @@ async def handle(payload: FormatterRequest = Body(...)):
                     status_code=404, detail=f"File not found: {file_path}"
                 )
 
-    # 💡 FIX 4: Add unconditional check/assertion to satisfy MyPy
     if resolved is None:
         raise HTTPException(status_code=500, detail="Internal file resolution error.")
 
@@ -104,4 +122,7 @@ async def handle(payload: FormatterRequest = Body(...)):
         raise HTTPException(status_code=400, detail="File contains no readable text")
 
     ag = FormatterAgent()
-    return JSONResponse(await ag.run(doc_text, api_key))
+    # propagate api_key and allow custom retries through env
+    return JSONResponse(
+        await ag.run(doc_text, api_key, max_retries=DEFAULT_LLM_RETRIES)
+    )

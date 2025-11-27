@@ -41,9 +41,9 @@ pkill -f "uvicorn" 2>/dev/null
 pkill -f "treehopper run" 2>/dev/null
 pkill -f "treehopper" 2>/dev/null
 
-if lsof -i :1560 > /dev/null 2>&1; then
-    PID=$(lsof -t -i :1560)
-    echo "⚠️  Port 1560 occupied — killing PID $PID"
+if lsof -i :1567 > /dev/null 2>&1; then
+    PID=$(lsof -t -i :1567)
+    echo "⚠️  Port 1567 occupied — killing PID $PID"
     kill -9 "$PID" 2>/dev/null
 fi
 

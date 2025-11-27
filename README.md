@@ -83,7 +83,7 @@ git clone <repo_url>
 cd treehopper-core
 pip install -r requirements.txt
 treehopper run
-Then open -> http://localhost:1560/docs   → Swagger UI
+Then open -> http://localhost:1567/docs   → Swagger UI
 ```
 
 ###  🔧 Treehopper CLI Commands
@@ -128,12 +128,32 @@ Treehopper includes a built-in CLI for running, testing, and invoking agents dir
 
 | Command                                                                 | Description                                                                 |
 |-------------------------------------------------------------------------|-----------------------------------------------------------------------------|
-| `treehopper chain build <name> <agent1> <agent2> ...`                   | Register a named chain using registered agents. Creates chain YAML + POST endpoint `/api/v1/chains/<name>` |
-| `treehopper chain run <name or id> [--payload '{...}'] [--payload-file path] [--detached] [--bg]` | Execute a named chain via `/api/v1/chains/{name}`. Payload passed only to first agent. Options: `--detached` (dedicated micro-app), `--bg` (background logs). |
-| `treehopper chain stop <name or id>`                                       | Stop a dedicated chain runtime if running                                   |
-| `treehopper chain delete <name or id>`                                     | Delete chain metadata and last run logs                                     |
-| `treehopper chain logs <name or id>`                                       | Show last execution summary + JSON                                          |
-| `treehopper chain <agent_path1> <agent_path2> ...` (Legacy)             | Direct call to `/api/v1/dev/chain` with static agent paths                  |
+| `treehopper chain build <name> <agent1> <agent2> ...`                   | Register a named chain using registered agents. Creates chain YAML + POST endpoint `/api/v1/chains/<name>`. |
+| `treehopper chain run <name or id> [--payload '{...}'] [--payload-file path] [--detached] [--bg] [--parallel N] [--concurrency M]` | Execute a chain via `/api/v1/chains/{name}`. `--parallel N` runs N full chain executions in parallel. `--concurrency M` throttles how many run at once. `--detached` creates a dedicated micro-app. |
+| `treehopper chain stop <name or id>`                                    | Stop a dedicated chain runtime if running.                                 |
+| `treehopper chain delete <name or id>`                                  | Delete chain metadata and run history.                                      |
+| `treehopper chain logs <name or id>`                                    | Show last execution summary + JSON.                                         |
+| `treehopper chain cancel <name or id> [--run-id RID or --all]`           | Cancel a running chain execution by `run_id` or cancel all active runs.     |
+| `treehopper chain cancel-batch <batch_id>`                              | Cancel all runs inside a parallel-execution batch.                          |
+| `treehopper chain <agent_path1> <agent_path2> ...` (Legacy)             | Direct call to `/api/v1/dev/chain` with static agent paths.                 |
+
+#### Parallel Usage Notes
+
+- `--parallel N` runs **N independent chain executions** (each with its own run_id).
+- Steps inside each chain remain **sequential** — Treehopper does not parallelize inside a chain.
+- Use `--concurrency M` to throttle execution and avoid LLM provider rate limits.
+- Avoid mixing `--parallel N` with `--detached` unless debugging, because all parallel runs will share a single micro-app instance.
+
+```
+⚠ Parallel vs Detached — When NOT to mix:
+      • `--parallel N` = runs N independent chain executions.
+      • `--detached` = launches ONE chain micro-app server.
+      → Running `--parallel N --detached` means:
+            N parallel clients all hitting a single micro-app instance.
+      → This is allowed but NOT recommended for heavy workloads.
+        Prefer: treehopper chain run <name> --parallel N  (no --detached)
+```
+
 
 ```
 Example Usage:

@@ -21,7 +21,7 @@ import signal
 load_dotenv()
 
 API_KEY = {"x-api-key": "demo-key-123"}
-BASE_URL = "http://localhost:1560"
+BASE_URL = "http://localhost:1567"
 PROD = os.getenv("PROD", "0") == "1"  # 🔥 ADD THIS LINE
 HOME = Path.home()
 TH_ROOT = HOME / ".treehopper"
@@ -162,7 +162,7 @@ def validate_agent_name(name: str) -> str:
 # SERVER HELPERS
 # ---------------------------------------------------------------------
 def run(
-    th_port: int = int(os.getenv("TH_PORT", 1560)), background: bool = False
+    th_port: int = int(os.getenv("TH_PORT", 1567)), background: bool = False
 ) -> None:
     ensure_runtime_dir()
     LOG_FILE = RUNTIME_DIR / "server.log"
@@ -211,7 +211,7 @@ def run(
     )
 
 
-def restart(th_port: int = 1560) -> None:
+def restart(th_port: int = 1567) -> None:
     print("🔄 Restarting Treehopper server...")
 
     # 1️⃣ Kill running uvicorn + treehopper servers
@@ -264,7 +264,7 @@ def status():
     try:
         os.kill(pid, 0)  # does nothing if process exists
         print(f"🟢 Treehopper server is RUNNING (PID {pid})")
-        print("URL: http://localhost:1560")
+        print("URL: http://localhost:1567")
     except ProcessLookupError:
         print("⚠️ PID file exists but process is not running — cleaning...")
         MAIN_PID_FILE.unlink(missing_ok=True)

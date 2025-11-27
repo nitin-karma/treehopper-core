@@ -114,7 +114,7 @@ echo "" | tee -a "$LOG_FILE"
 echo "STEP 11 — Execute chain via Python HTTP" | tee -a "$LOG_FILE"
 python3 - <<EOF | tee -a "$LOG_FILE"
 import requests, json
-url="http://localhost:1560/api/v1/chains/exec_summ"
+url="http://localhost:1567/api/v1/chains/exec_summ"
 headers={"x-api-key":"demo-key-123"}
 payload={"file_path": "$FILE_PATH"}
 print("POST", url, "→", json.dumps(payload))
@@ -163,7 +163,7 @@ echo "" | tee -a "$LOG_FILE"
 # STEP 14 — Final health & cleanup
 ###############################################################################
 echo "STEP 14 — Final health & stop" | tee -a "$LOG_FILE"
-curl -s http://localhost:1560/api/v1/sys/health -H "x-api-key: demo-key-123" | tee -a "$LOG_FILE"
+curl -s http://localhost:1567/api/v1/sys/health -H "x-api-key: demo-key-123" | tee -a "$LOG_FILE"
 treehopper stop | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 
