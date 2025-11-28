@@ -1,202 +1,156 @@
-<p align="left">
-  <img src="treehopper/static/th_logo.png" alt="Treehopper Logo" width="180">
-</p>
+<div align="center">
 
-<h2 align="left">The Agent Builder and Orchestration Automation Framework</h2>
+# 🌿 Treehopper Core
 
-<p align="left">
-  <strong>Create, chain, and deploy autonomous agents — locally or on the edge.</strong>
-</p>
-<br/>
+### The Agent Builder & Orchestration Automation Framework
 
-<p align="left">
-  <img src="https://img.shields.io/badge/python-3.10+-blue" />
-  <img src="https://img.shields.io/badge/FastAPI-✔-green" />
-  <img src="https://img.shields.io/badge/ChromaDB-Memory-orange" />
-  <img src="https://img.shields.io/badge/LLM%20Providers-OpenAI%20%7C%20Gemini%20%7C%20Perplexity-purple" />
-  <img src="https://img.shields.io/badge/Status-Active-brightgreen" />
-</p>
+<img src="treehopper/static/th_logo.png" alt="Treehopper Logo" width="180">
+
+**Create, chain, and orchestrate autonomous agents — locally, on edge devices, or in distributed fleets.**
+
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-✔-green)](https://fastapi.tiangolo.com/)
+[![ChromaDB](https://img.shields.io/badge/ChromaDB-Memory-orange)](https://www.trychroma.com/)
+[![LLM Providers](https://img.shields.io/badge/LLM%20Providers-OpenAI%20%7C%20Gemini%20%7C%20Perplexity-purple)](#)
+[![Status](https://img.shields.io/badge/Status-Active-brightgreen)](#)
+
+</div>
 
 ---
 
-### <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> What is Treehopper? - Motivation
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> What Is Treehopper?
 
-Treehopper is built on a simple but powerful belief — that AI workflows shouldn’t be locked behind massive cloud platforms, vendor lock-in, or enterprise-grade complexity. Developers deserve tools that are fast, local-first, hackable, and fully in their control. Treehopper re-imagines how agents, chains, and intelligent micro-services should run: lightweight, modular, portable, and fun to build with. This project is not just open-source code — it’s a mission to empower every developer to orchestrate AI on their own terms, from a single laptop to a global fleet. If that excites you, you’re in the right place. Welcome to Treehopper. 🌿
+**Treehopper** is a local-first, agent-centric, fully open-source automation framework for building intelligent workflows — from edge AI agents to orchestrated micro-services and distributed chains.
 
-
-### <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Why This Project Matters
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Why This Project Matters
 
 AI automation is rapidly becoming the backbone of modern software — yet the tooling around it remains fragmented, heavyweight, and increasingly centralized. Existing orchestrators either force developers into closed ecosystems, or bury simple ideas under layers of infrastructure complexity. Treehopper takes a different path. It brings AI orchestration back to where it belongs: *close to the developer*.
 
-Treehopper matters because it enables:
+It brings together:
 
-### • **Local-first agent execution**
-Run AI workflows without GPUs, cloud dependencies, or latency-sensitive round-trips — ideal for privacy-critical, cost-sensitive, or offline-first applications.
+- ✔ Agent micro-apps
+- ✔ Chain orchestration
+- ✔ Multi-provider LLM calls
+- ✔ Semantic memory
+- ✔ Parallel execution
+- ✔ Cancellation
+- ✔ Edge-friendly deployment
+- ✔ Portable FastAPI runtimes
 
-### • **Modular micro-app architecture**
-Every agent and chain runs as an independent FastAPI micro-service, with predictable ports, isolated runtimes, and complete transparency.
+### <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Core Principles
 
-### • **A CLI designed for builders**
-No dashboards required. Spin up agents, run chains, inspect logs, manage history, and orchestrate complex flows — all from your terminal.
+| | |
+|---|---|
+| 🟦 **Lightweight** | Run on laptops, VMs, Raspberry Pis, or edge nodes — no GPUs required |
+| 🟩 **Modular** | Every agent and chain becomes its own FastAPI micro-service |
+| 🟧 **Developer-first** | Build and debug everything via CLI with predictable logs, pids, URLs, and registries |
+| 🟥 **Deterministic** | Repeatable runs, structured history, and precise observability |
+| 🟪 **Cloud-optional** | You own the compute. You choose the LLM provider. No lock-in |
 
-### • **Deterministic & repeatable workflows**
-Treehopper gives developers the reliability and observability of enterprise orchestrators, but with zero vendor lock-in.
-
-### • **A real alternative to centralized AI platforms**
-As AI ecosystems become more closed, Treehopper stands for autonomy. You own your workflows, your data, your compute, and your future.
-
-Treehopper is more than a framework — it’s a statement about how AI tooling should evolve: open, accessible, transparent, and developer-first. If you believe in that vision, join us and help shape the next generation of AI infrastructure.
-
-
-### • Treehopper in a core its a **modular agentic framework** built on FastAPI that allows developers to:
-
-- Define **agents** using a lightweight decorator
-- **Chain multiple agents** into workflows using a single POST endpoint
-- Use **semantic memory** backed by ChromaDB
-- Call **multiple LLM providers** interchangeably
-- Deploy agents locally, on edge devices, or in the cloud
-- Stabilize the agent and chain execution and making it observable.
-
-Treehopper is **clean, repeatable, scalable agent server** built for **AI automation, RPA, decision systems, IoT edge coordination, and agent marketplaces.**
+> **Treehopper is a statement:**
+> AI automation should be open, simple, transparent, and fully in the developer's control.
 
 ---
 
-###  <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Key Features
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Why Treehopper?
 
-| Capability | Status |
-|----------|--------|
-| Auto-discovered agent modules | ✔ |
-| GET / POST agent execution | ✔ |
-| Runtime chaining with `/api/v1/dev/chain` | ✔ |
-| ChromaDB semantic memory | ✔ |
-| Ephemeral in-memory memory for pytest | ✔ |
-| Multi-provider LLM support | ✔ |
-| CLI support (`treehopper run / call / build`) | ✔ |
-| Full test suite | ✔ |
+| Feature | Description |
+|---------|-------------|
+| 🌱 **Local-first agent execution** | No cloud round-trips. No latency. No dependencies |
+| 🔌 **Micro-app architecture** | Each agent becomes a standalone FastAPI micro-service with its own port |
+| 🔄 **Chains = portable workflows** | Define multi-step flows with predictable inputs & outputs |
+| 🧠 **Built-in memory** | Long-term semantic memory (ChromaDB) or ephemeral testing memory |
+| ⚡ **Multi-LLM support** | Switch between OpenAI, Gemini, Perplexity, or local models seamlessly |
+| 🧵 **Full orchestration core** | Parallel chains, throttling, cancellation, logging, history, safe cleanup |
+| 🧩 **Edge deployment** | Package agents/chains to run on compute-limited devices |
+| 🛠 **CLI for everything** | Build, lint, run, stop, inspect, clean, orchestrate |
 
 ---
 
-###  <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Quickstart
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Quickstart
 
 ```bash
 git clone <repo_url>
 cd treehopper-core
 pip install -r requirements.txt
+
+# Start main server
 treehopper run
-Then open -> http://localhost:1567/docs   → Swagger UI
 ```
 
-###  🔧 Treehopper CLI Commands
-```
-Treehopper includes a built-in CLI for running, testing, and invoking agents directly from the terminal.
-```
+**Open Swagger UI:**
+[http://localhost:1567/docs](http://localhost:1567/docs)
 
-# Treehopper CLI Commands
+---
 
-### Main Server/Process Commands
-
-| Command                     | Description                                                                 |
-|-----------------------------|-----------------------------------------------------------------------------|
-| `treehopper status`         | Show if the main server is running                                          |
-| `treehopper run`            | Start the main server                                                       |
-| `treehopper run --bg`       | Start the main server in background                                         |
-| `treehopper stop`           | Stop the main server                                                        |
-| `treehopper restart`        | Restart main server                                                         |
-| `treehopper list`           | List installed agents                                                       |
-| `treehopper clean`          | **Be Careful** - Cleanup servers, pids, agents, chain                       |
-
-### Agent Related CLI Commands
-
-| Command                                         | Description                                                                 |
-|-------------------------------------------------|-----------------------------------------------------------------------------|
-| `treehopper push-file <agent-name> <file_path>` | Push input file to agent for file operations                                |
-| `treehopper call <path> '<json>'`               | Call an agent                                                               |
-| `treehopper init <agent_name>`                  | Create agent scaffold template                                              |
-| `treehopper lint <agent_folder>`                | Validate `handler.py` + YAML                                                |
-| `treehopper build <agent_folder>`               | Install agent to registry and make it available with main server            |
-| `treehopper agent info <ref>`                   | Show metadata                                                               |
-| `treehopper agent run <name> --detached [--bg]` | Start dedicated agent runtime (optionally in background)                    |
-| `treehopper agent delete <ref>`                 | Delete installed agent safely                                               |
-
-### Chain Related CLI Commands
-
-| Command               | Description                                                                 |
-|-----------------------|-----------------------------------------------------------------------------|
-| `treehopper chain`    | View all Chain related commands                                             |
-
-### Treehopper Chain Commands
-
-| Command                                                                 | Description                                                                 |
-|-------------------------------------------------------------------------|-----------------------------------------------------------------------------|
-| `treehopper chain build <name> <agent1> <agent2> ...`                   | Register a named chain using registered agents. Creates chain YAML + POST endpoint `/api/v1/chains/<name>`. |
-| `treehopper chain run <name or id> [--payload '{...}'] [--payload-file path] [--detached] [--bg] [--parallel N] [--concurrency M]` | Execute a chain via `/api/v1/chains/{name}`. `--parallel N` runs N full chain executions in parallel. `--concurrency M` throttles how many run at once. `--detached` creates a dedicated micro-app. |
-| `treehopper chain stop <name or id>`                                    | Stop a dedicated chain runtime if running.                                 |
-| `treehopper chain delete <name or id>`                                  | Delete chain metadata and run history.                                      |
-| `treehopper chain logs <name or id>`                                    | Show last execution summary + JSON.                                         |
-| `treehopper chain cancel <name or id> [--run-id RID or --all]`           | Cancel a running chain execution by `run_id` or cancel all active runs.     |
-| `treehopper chain cancel-batch <batch_id>`                              | Cancel all runs inside a parallel-execution batch.                          |
-| `treehopper chain <agent_path1> <agent_path2> ...` (Legacy)             | Direct call to `/api/v1/dev/chain` with static agent paths.                 |
-
-#### Parallel Usage Notes
-
-- `--parallel N` runs **N independent chain executions** (each with its own run_id).
-- Steps inside each chain remain **sequential** — Treehopper does not parallelize inside a chain.
-- Use `--concurrency M` to throttle execution and avoid LLM provider rate limits.
-- Avoid mixing `--parallel N` with `--detached` unless debugging, because all parallel runs will share a single micro-app instance.
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Project Structure
 
 ```
-⚠ Parallel vs Detached — When NOT to mix:
-      • `--parallel N` = runs N independent chain executions.
-      • `--detached` = launches ONE chain micro-app server.
-      → Running `--parallel N --detached` means:
-            N parallel clients all hitting a single micro-app instance.
-      → This is allowed but NOT recommended for heavy workloads.
-        Prefer: treehopper chain run <name> --parallel N  (no --detached)
+treehopper-core/
+├── treehopper/
+│   ├── agents/                    # Built-in agents
+│   ├── utils/                     # Utilities & run registry
+│   ├── treehopper.py              # Agent runtime, registry, chaining
+│   ├── treehopper_llm.py          # Multi-provider LLM abstraction
+│   ├── treehopper_cli.py          # Main CLI entrypoint
+│   ├── agent_runtime_app.py       # Agent micro-app runtime
+│   ├── chain_runtime_app.py       # Chain micro-app runtime (detached mode)
+│   ├── treehopper_chains.py       # Chain controller + parallel + cancellation
+│   ├── treehopper_parallel.py     # Parallel execution engine
+│   ├── treehopper_cancellation.py # Cancellation API (Phase 3.3)
+│   └── treehopper_cleaner.py      # Clean-up utility
+├── examples/                      # Agent & chain usage
+├── static/                        # Branding & assets
+└── dashboard/                     # Optional UI
 ```
 
+---
+
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Agent Development
+
+### Create a new agent
+
+```bash
+treehopper init weather
+```
+
+This generates:
 
 ```
-Example Usage:
- - Scaffolding a New Agent
-  treehopper init weather
-          ->  creates
-                -> ~/.treehopper/registry/agents/weather/
-                    ├── schema.py ->> add your pydantic models
-                    └── handler.py ->> write your helper python functions to run agent
-
-- To deploy the agent to main server
-  treehopper build weather
-          ->  Push the agent to default main server
-
- - Auto-discovered on next
-  treehopper run
-          -> updates the main server to have new agent running
-
-- Chain the agent
-  treehopper call /api/v1/dev/chain \
-      '{
-          "chain": [
-              {"path": "/api/v1/agents/greet", "params": {"name": "Alpha"}},
-              {"path": "/api/v1/agents/math", "params": {"a": 2, "b": 3}}
-          ]
-    }'
-
+weather/
+├── handler.py   # Your business logic
+└── schema.py    # Request/response models
 ```
-### <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Creating an Treehopper Agent using Python code
-```
+
+### Implement agent
+
+```python
+# handler.py
 from treehopper.treehopper import agent
 
-@agent("/greet", method="GET", goal="Greet the user")
+@agent("greet", method="GET", goal="Greet the user")
 async def greet(name: str = "Nitin"):
     return {"message": f"Hello, {name}!"}
+```
 
-The agent automatically becomes available at:
+Agent becomes available at:
+
+```
 GET /api/v1/agents/greet?name=Nitin
-
 ```
 
-### <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Chaining Agents
+### Deploy to main server
+
+```bash
+treehopper build weather
+treehopper run
 ```
+
+---
+
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Chaining Agents
+
+```http
 POST /api/v1/dev/chain
 {
   "chain": [
@@ -204,57 +158,215 @@ POST /api/v1/dev/chain
     { "path": "/api/v1/agents/llm_compare", "params": { "prompt": "Write a haiku about agents" } }
   ]
 }
-
-Treehopper executes workflows sequentially, passing results back to the caller.
 ```
 
-### <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Multi-Provider LLM Support
-```
-await call_llm("Explain quantum computing", provider="openai")
-await call_llm("Explain recycling benefits", provider="gemini")
-await call_llm("Solar vs Wind comparison", provider="perplexity")
+Treehopper executes each step sequentially, passing outputs downstream.
 
-Providers supported:
- - OpenAI (GPT-4o / GPT-4o-mini)
- - Gemini (Pro)
- - Perplexity (Mistral-7B)
-```
+---
 
-### <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Project Structure
-```
-treehopper-core/
-├── treehopper/                # Core framework
-|   ├── agents                 # built in agent ednpoints
-|   ├── utils                  # utility module
-│   ├── treehopper.py          # Runtime, registry, chaining, memory
-│   ├── treehopper_llm.py      # Multi-LLM abstraction
-│   └── treehopper_cli.py      # CLI
-|   └── agent_runtime_app.py   # To launch an agent as micro-app
-|   └── chain_runtime_app.py   # To launch an agent connected chain as micro-app
-|   └── treehopper_chains.py   # Chains controller
-|   └── treehopper_cleaner.py  # To clean the runtimes / logs / pids
-├── examples/                  # built-in as examples
-├── static/                    # Branding assets
-└── dashboard/                 # Optional UI
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Multi-provider LLM Support
+
+```python
+await call_llm("What is edge AI?", provider="openai")
+await call_llm("Explain solar energy", provider="gemini")
+await call_llm("Compare wind vs hydro", provider="perplexity")
 ```
 
-### <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> ./clean.sh Shell Script
+**Supported providers:**
+
+- OpenAI (GPT-4o, GPT-4o-mini)
+- Google Gemini Pro
+- Perplexity (Mistral models)
+- Local mock provider (for testing)
+
+---
+
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Chain Runtime (Detached Mode)
+
+Detached mode launches a full FastAPI runtime per chain, ideal for:
+
+- ✔ Cancellation
+- ✔ Long-running workflows
+- ✔ Persistent runtimes
+- ✔ Parallel orchestrators
+- ✔ Offline edge execution
+
+### Run chain in detached mode
+
+```bash
+treehopper chain run my_chain --detached
 ```
-To Cleanup -
-- Cleaning treehopper memory
-- Python caches
-- Kill running uvicorn server
-- Remove installed agents (keep subscription id)
+
+Starts:
 
 ```
-
-### <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> License
-```
-Treehopper is available under the MIT License.
+http://localhost:<auto_port>/api/v1/<chain>/run
 ```
 
-### <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Contributing
+### Run detached in background
+
+```bash
+treehopper chain run my_chain --detached --bg
 ```
-Pull requests and community-built agents are welcome!
-If you're building an agent marketplace or startup around Treehopper — we’d love to collaborate.
+
+### Stop it
+
+```bash
+treehopper chain stop my_chain
 ```
+
+---
+
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Parallel Execution (Phase 3.2)
+
+Run a chain N times in parallel:
+
+```bash
+treehopper chain run my_chain --parallel 20 --concurrency 5
+```
+
+**Key points:**
+
+- Parallelization occurs across chains, not inside a chain
+- Throttle with `--concurrency` to avoid provider rate limits
+- Each parallel run has its own run_id, history, results
+
+---
+
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Cancellation (Phase 3.3)
+
+Treehopper supports cooperative async cancellation, similar to Temporal/Celery but at the agent-chain-runtime level.
+
+> **Note:** Cancellation works ONLY in detached mode, because only detached mode provides true async task lifecycles.
+
+### 🟩 When Cancellation Works
+
+| Scenario | Supported | Reason |
+|----------|-----------|--------|
+| `chain run --detached` | ✅ YES | Async micro-app maintains cancellable tasks |
+| `chain run --detached --bg` | ✅ YES | Same as above |
+| Cancelling by run_id | ✅ YES | Tracked in ACTIVE_TASKS |
+| Cancelling all runs (`--all`) | ✅ YES | Cancels all active tasks for chain |
+| Cancelling mid-agent (sleep, network calls, LLM waits) | ✅ YES | Cooperative awaits allow interruption |
+
+### 🟥 When Cancellation Won't Work
+
+| Scenario | Supported? | Why |
+|----------|------------|-----|
+| Normal chain run (non-detached) | ❌ NO | Blocking HTTP call; no async context |
+| `--parallel` without detached | ❌ NO | Each run is a synchronous client request |
+| `--parallel --detached` | ❌ NO | All parallel calls target one blocking endpoint |
+| CPU-bound agents | ❌ NO | Cannot be cancelled without async yield |
+
+### 🟦 Cancel Commands
+
+**Cancel by run_id:**
+
+```bash
+treehopper chain cancel --run <run_id>
+```
+
+**Cancel all active runs of a chain:**
+
+```bash
+treehopper chain cancel --all <chain>
+```
+
+**Cancel an entire batch:**
+
+```bash
+treehopper chain cancel-batch <batch_id>
+```
+
+---
+
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Cleaning Up
+
+```bash
+treehopper clean
+```
+
+This command:
+
+- Kills stuck uvicorn processes
+- Removes pids/logs
+- Resets registry (keeps subscription id)
+
+---
+
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Full CLI Reference
+
+### Main Server
+
+| Command | Description |
+|---------|-------------|
+| `treehopper run` | Start main server |
+| `treehopper run --bg` | Start in background |
+| `treehopper stop` | Stop main server |
+| `treehopper restart` | Restart |
+| `treehopper status` | Check health |
+
+### Agents
+
+| Command | Description |
+|---------|-------------|
+| `treehopper init <agent>` | Scaffold new agent |
+| `treehopper lint <agent>` | Validate |
+| `treehopper build <agent>` | Install into registry |
+| `treehopper agent run <agent> --detached` | Start as micro-app |
+
+### Chains
+
+| Command | Description |
+|---------|-------------|
+| `treehopper chain build` | Create chain |
+| `treehopper chain run` | Run chain |
+| `treehopper chain stop` | Stop chain runtime |
+| `treehopper chain logs` | Show last run |
+| `treehopper chain cancel` | Cancel run(s) |
+| `treehopper chain cancel-batch` | Cancel batch |
+
+---
+
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> License
+
+**MIT License**
+
+Treehopper is free for personal, commercial, edge, and enterprise usage.
+
+---
+
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Contributing
+
+Pull requests, bug fixes, feature proposals, agent contributions, and ecosystem tools are welcome.
+
+If you're building:
+
+- An agent marketplace
+- Edge AI system
+- AI workflow automation SaaS
+- Or a new orchestration platform
+
+**We'd love to collaborate.**
+
+---
+
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> The Vision
+
+Treehopper is built on the belief that AI automation should be **democratized**.
+
+- Not controlled by large platforms
+- Not hidden behind proprietary runtimes
+- Not tied to a single cloud provider
+
+**Local-first. Open. Portable. Modular. Hackable. Developer-owned.**
+
+If you believe in that future — **welcome to Treehopper.**
+
+---
+
+<div align="center">
+
+Made with lot of hardwork <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> by me
+
+</div>

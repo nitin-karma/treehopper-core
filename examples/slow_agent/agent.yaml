@@ -1,0 +1,13 @@
+agent_name: slow_agent
+agent_id: slow_agent-2f868dfc
+subscription_id: a75110fc-0cec-45fc-8ca7-edfe63744497
+entrypoint: /slow_agent
+description: slow_agent agent
+inputs:
+- name: name
+  type: string
+outputs:
+- name: message
+  type: string
+tags: []
+version: '1.0'

@@ -730,38 +730,43 @@ Treehopper Chain Commands
       Payload (if provided) is passed only to the FIRST agent.
 
       --detached
-            Run the chain using a dedicated chain micro-app (FastAPI + its own port).
+            Launch a dedicated chain micro-app (FastAPI runtime).
+            Required for cancellable long-running operations.
 
       --bg
-            Only valid with --detached. Starts the runtime in background and prints log file path.
+            Only valid with --detached. Starts the runtime in background
+            and prints log file path.
 
       --parallel N
             Execute the SAME chain N times in parallel.
-            Each run receives its own run_id and is fully isolated.
-            ⚠ Note: parallelization is at the CHAIN level — steps inside a chain still run sequentially.
+            Each run receives its own run_id.
+            Steps inside a chain remain sequential.
 
       --concurrency M
             Maximum number of chain runs executed at once (M <= parallel).
-            Useful to avoid provider rate-limits (OpenAI 429, etc.).
-            If omitted, concurrency defaults to N.
 
       ⚠ SAFETY NOTES:
-          • Do NOT combine `--parallel` AND `--detached` unless you understand the behavior:
-                - Parallel mode = many FULL chain runs in parallel.
-                - Detached mode = spawns ONE dedicated runtime, so parallel runs share a single micro-app.
-          • Recommended for high-scale work:
-                --parallel N  (CLI-level parallelism)
-                --concurrency M  (throttling)
-                Avoid --detached unless debugging.
+          • Avoid mixing `--parallel` AND `--detached` unless debugging.
+          • Parallel mode = many independent chain runs.
+          • Detached mode = one dedicated micro-app runtime.
 
-  treehopper chain cancel <name|id> [--run-id RID | --all]
-      Cancel running chain executions.
-      --run-id RID   : cancel a specific running chain execution.
-      --all          : cancel all active executions of this chain.
+Cancellation Support Matrix
+────────────────────────────────────────────
+| Execution Mode                  | Cancellable? | Reason                                      |
+|---------------------------------|--------------|---------------------------------------------|
+| chain run <name> --detached     |     YES      | Runs inside async micro-app runtime         |
+| chain run <name> --detached --bg|     YES      | Background async runtime, cooperative cancel |
+| chain run <name>                |     NO       | Main server request thread is blocking      |
+| chain run <name> --parallel N   |     NO       | Each run is a blocking HTTP request         |
+| chain run <name> --parallel N --detached | NO | All runs hit one micro-app but blocking call |
+| cancel --run <run_id>           | YES only for detached runs                  |
+| cancel-batch <batch_id>         | YES only for detached runs                  |
+
+  treehopper chain cancel <name|id> [--run <run_id> | --all]
+      Cancel active asynchronous chain executions.
 
   treehopper chain cancel-batch <batch_id>
-      Cancel all runs inside a parallel batch.
-
+      Cancel all runs inside a cancellable batch.
 
   treehopper chain stop <name|id>
       Stop a dedicated chain runtime if running.
@@ -775,7 +780,6 @@ Treehopper Chain Commands
 Legacy:
   treehopper chain <agent_path1> <agent_path2> ...
       Direct call to /api/v1/dev/chain with static agent paths.
-
 """
     )
 
