@@ -14,20 +14,17 @@ agent_id = get_agent_id(agent_name)
 async def handle(payload: SlowAgentStage2Request = Body(...)):
     run_id = get_run_id()
 
-    # READY signal
     print("[slow_agent_stage2] READY")
     await th_sleep(0)
-
     if run_id and await is_run_cancelled(run_id):
-        print("[slow_agent_stage2] CANCEL detected BEFORE work")
+        print("[slow_agent_stage2] CANCEL detected BEFORE starting work")
         raise asyncio.CancelledError()
 
     print("[slow_agent_stage2] Step2 starting...")
-
-    for i in range(100):
-        print(f"[slow_agent_stage2] working... {i+1}/5")
+    for i in range(20):
+        print(f"[slow_agent_stage2] working... {i+1}/20")
         try:
-            await th_sleep(1)
+            await th_sleep(0.2)
         except asyncio.CancelledError:
             print("[slow_agent_stage2] CANCEL detected DURING work")
             raise

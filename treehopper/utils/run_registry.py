@@ -5,13 +5,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# from treehopper.th_config import (
-#     RUNTIME_DIR,
-#     CANCEL_DIR,
-# )
+from treehopper.th_config import (
+    #     RUNTIME_DIR,
+    CANCEL_DIR,
+)
 
 # Ensure cancel dir exists
-# CANCEL_DIR.mkdir(parents=True, exist_ok=True)
+print(f"[run_registry] creating or checking Cancel Directory - {CANCEL_DIR}")
+CANCEL_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_RUNS_PER_CHAIN = 50
 

@@ -11,6 +11,8 @@ import yaml
 from pathlib import Path
 from typing import Any, Dict, List, Optional, cast
 
+# from datetime import datetime
+
 # ======================================================================
 # 2. Third-Party Imports
 # ======================================================================
@@ -163,12 +165,18 @@ async def health():
 # ======================================================================
 # NEW: STATUS ENDPOINT (PATCH #3)
 # ======================================================================
+
+
+def _load_run_json(run_file: Path) -> Optional[Dict[str, Any]]:
+    try:
+        txt = run_file.read_text()
+        return json.loads(txt)
+    except Exception:
+        return None
+
+
 @app.get(f"/api/v1/{CHAIN_NAME}/status/{{run_id}}")
 async def chain_status(run_id: str):
-    """
-    Dashboard & CLI helper:
-      Returns last recorded state for run_id.
-    """
     if not CHAIN_DIR:
         raise HTTPException(500, "CHAIN_DIR not configured")
 
@@ -177,7 +185,17 @@ async def chain_status(run_id: str):
         raise HTTPException(404, f"run_id {run_id} not found")
 
     try:
-        return json.loads(run_file.read_text())
+        data = json.loads(run_file.read_text())
+
+        # IMPORTANT: flatten "status" to top-level to match test script
+        return {
+            "ok": True,
+            "status": data.get("status"),
+            "current_step_index": data.get("current_step_index"),
+            "cancelled": data.get("cancelled"),
+            "success": data.get("success"),
+            "raw": data,
+        }
     except Exception as e:
         raise HTTPException(500, f"Failed loading status: {e}")
 
@@ -221,61 +239,83 @@ app.include_router(runtime_cancel)
 # ======================================================================
 @app.post(f"/api/v1/{CHAIN_NAME}/run")
 async def run_chain(request: Request, payload: dict = Body(default={})):
+    print("[CHAIN RUN TIME] to run the chain")
     agents_spec: List[Dict[str, Any]] = CHAIN_CFG.get("agents", [])
-
     if not agents_spec:
-        raise HTTPException(400, "Chain has no agents configured")
+        raise HTTPException(status_code=400, detail="Chain has no agents configured")
 
-    run_id = request.headers.get("X-Treehopper-Run-Id")
-    batch_id = request.headers.get("X-Treehopper-Batch-Id")
+    root_payload = payload or {}
+    run_id = request.headers.get("X-Treehopper-Run-Id") or request.headers.get(
+        "x-treehopper-run-id"
+    )
+    batch_id = request.headers.get("X-Treehopper-Batch-Id") or request.headers.get(
+        "x-treehopper-batch-id"
+    )
 
     if not run_id:
-        raise HTTPException(400, "Detached runtime ERROR: missing run_id")
+        raise HTTPException(
+            status_code=400, detail="Detached runtime ERROR: run_id missing."
+        )
 
-    # Mark run as starting
+    print(f"[runtime] Using CHAIN_DIR = {CHAIN_DIR}")
+    print(f"[runtime] CANCEL_DIR = {CANCEL_DIR}")
+
+    # -------------------------------
+    # PENDING (written only once)
+    # -------------------------------
     run_registry_mod.record_chain_run(
         chain_name=CHAIN_NAME,
         chain_id=CHAIN_ID,
         chain_dir=CHAIN_DIR,
-        payload=payload,
+        payload=root_payload,
         results=[],
         detached=True,
         success=False,
         run_id=run_id,
         cancelled=False,
-        status="starting",
+        status="pending",
         current_step_index=-1,
     )
 
     token = set_run_id(run_id)
 
     async def _execute_chain():
+        nonlocal root_payload
         results: List[Any] = []
-        prev_output = None
+        prev_output: Dict[str, Any] | None = None
+
+        # -------------------------------
+        # STARTING
+        # -------------------------------
+        run_registry_mod.record_chain_run(
+            chain_name=CHAIN_NAME,
+            chain_id=CHAIN_ID,
+            chain_dir=CHAIN_DIR,
+            payload=root_payload,
+            results=results,
+            detached=True,
+            success=False,
+            run_id=run_id,
+            cancelled=False,
+            status="starting",
+            current_step_index=-1,
+        )
 
         for idx, step in enumerate(agents_spec):
-            # MARK RUNNING
-            run_registry_mod.record_chain_run(
-                chain_name=CHAIN_NAME,
-                chain_id=CHAIN_ID,
-                chain_dir=CHAIN_DIR,
-                payload=payload,
-                results=results,
-                detached=True,
-                success=False,
-                run_id=run_id,
-                cancelled=False,
-                status="running",
-                current_step_index=idx,
-            )
+            path = step.get("path")
+            inputs = step.get("inputs", [])
 
-            # PRE-CANCEL
+            # -------------------------------
+            # PRE-CANCEL CHECK
+            # -------------------------------
+            print(f"[RUNTIME] Pre-step cancel check for step {idx}, run_id={run_id}")
             if await is_run_cancelled(run_id):
+                print(f"[RUNTIME] CANCELLED before starting step {idx}")
                 return run_registry_mod.record_chain_run(
                     chain_name=CHAIN_NAME,
                     chain_id=CHAIN_ID,
                     chain_dir=CHAIN_DIR,
-                    payload=payload,
+                    payload=root_payload,
                     results=results,
                     detached=True,
                     success=False,
@@ -285,34 +325,74 @@ async def run_chain(request: Request, payload: dict = Body(default={})):
                     current_step_index=idx,
                 )
 
-            # PARAMS
+            # -------------------------------
+            # PREP INPUTS
+            # -------------------------------
             if idx == 0:
-                params = dict(payload)
+                params = dict(root_payload)
             else:
                 params = {}
                 if prev_output:
-                    inputs = step.get("inputs", [])
                     if inputs:
                         for inp in inputs:
-                            name = inp["name"]
-                            if name in prev_output:
-                                params[name] = prev_output[name]
+                            nm = inp.get("name")
+                            if nm in prev_output:
+                                params[nm] = prev_output[nm]
                     else:
                         params = dict(prev_output)
 
-            # EXECUTE AGENT
-            try:
-                step_result = await cancellation_guard(
-                    run_agent_path(step["path"], params),
-                    run_id,
-                    idx,
-                )
-            except asyncio.CancelledError:
+            # ======================================================
+            # ⭐ CRITICAL FIX ⭐ — deterministic "running" state write
+            # ======================================================
+            run_registry_mod.record_chain_run(
+                chain_name=CHAIN_NAME,
+                chain_id=CHAIN_ID,
+                chain_dir=CHAIN_DIR,
+                payload=root_payload,
+                results=results,
+                detached=True,
+                success=False,
+                run_id=run_id,
+                cancelled=False,
+                status="running",
+                current_step_index=idx,
+            )
+            # ======================================================
+
+            # -------------------------------
+            # FINAL CANCEL CHECK BEFORE EXEC
+            # -------------------------------
+            if await is_run_cancelled(run_id):
+                print(f"[RUNTIME] CANCELLED just before executing step {idx}")
                 return run_registry_mod.record_chain_run(
                     chain_name=CHAIN_NAME,
                     chain_id=CHAIN_ID,
                     chain_dir=CHAIN_DIR,
-                    payload=payload,
+                    payload=root_payload,
+                    results=results,
+                    detached=True,
+                    success=False,
+                    run_id=run_id,
+                    cancelled=True,
+                    status="cancelled",
+                    current_step_index=idx,
+                )
+
+            # -------------------------------
+            # EXECUTE AGENT
+            # -------------------------------
+            try:
+                print(f"[RUNTIME] Executing step {idx} via {path} (run_id={run_id})")
+                step_result = await cancellation_guard(
+                    run_agent_path(path, params), run_id, idx
+                )
+            except asyncio.CancelledError:
+                print(f"[cancellation_guard] CANCELLED at step={idx}, run_id={run_id}")
+                return run_registry_mod.record_chain_run(
+                    chain_name=CHAIN_NAME,
+                    chain_id=CHAIN_ID,
+                    chain_dir=CHAIN_DIR,
+                    payload=root_payload,
                     results=results,
                     detached=True,
                     success=False,
@@ -322,11 +402,12 @@ async def run_chain(request: Request, payload: dict = Body(default={})):
                     current_step_index=idx,
                 )
             except Exception as e:
+                print(f"[RUNTIME] Step {idx} failed: {e}")
                 return run_registry_mod.record_chain_run(
                     chain_name=CHAIN_NAME,
                     chain_id=CHAIN_ID,
                     chain_dir=CHAIN_DIR,
-                    payload=payload,
+                    payload=root_payload,
                     results=results + [{"error": str(e)}],
                     detached=True,
                     success=False,
@@ -343,12 +424,14 @@ async def run_chain(request: Request, payload: dict = Body(default={})):
                 else {"result": step_result}
             )
 
-        # FINAL SUCCESS
+        # -------------------------------
+        # COMPLETED SUCCESSFULLY
+        # -------------------------------
         return run_registry_mod.record_chain_run(
             chain_name=CHAIN_NAME,
             chain_id=CHAIN_ID,
             chain_dir=CHAIN_DIR,
-            payload=payload,
+            payload=root_payload,
             results=results,
             detached=True,
             success=True,
@@ -358,7 +441,9 @@ async def run_chain(request: Request, payload: dict = Body(default={})):
             current_step_index=len(results) - 1,
         )
 
-    # WRAP IN CANCELLATION CONTROLLER
+    # ---------------------------------------------------
+    # WRAP WITH CANCELLATION REGISTRATION
+    # ---------------------------------------------------
     try:
         wrapped = await run_with_cancellation(
             run_id=run_id,
@@ -368,5 +453,22 @@ async def run_chain(request: Request, payload: dict = Body(default={})):
         )
     finally:
         reset_run_id(token)
+
+    # ---------------------------------------------------
+    # GLOBAL CANCEL RETURN
+    # ---------------------------------------------------
+    if isinstance(wrapped, dict) and wrapped.get("cancelled"):
+        run_registry_mod.record_chain_run(
+            chain_name=CHAIN_NAME,
+            chain_id=CHAIN_ID,
+            chain_dir=CHAIN_DIR,
+            payload=root_payload,
+            results=wrapped.get("results", []),
+            detached=True,
+            success=False,
+            run_id=run_id,
+            cancelled=True,
+            status="cancelled",
+        )
 
     return wrapped

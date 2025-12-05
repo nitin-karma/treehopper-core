@@ -1,7 +1,4 @@
 import asyncio
-
-# from pathlib import Path
-# from treehopper.th_config import CANCEL_DIR
 from treehopper.treehopper_cancellation import is_run_cancelled
 from treehopper.runtime_context import get_run_id
 
@@ -18,36 +15,64 @@ async def _check_cancellation(run_id: str):
 
 
 # ----------------------------------------------------------------------
-# PUBLIC: Cancellable sleep
+# PUBLIC: Cancellable sleep (robust)
 # ----------------------------------------------------------------------
 async def th_sleep(seconds: float):
     """
-    Sleep with cancellation checks every 100ms.
-    This ensures agent code remains highly responsive to cancellation.
+    Sleep in small slices and check cancellation after each slice.
+    Guarantees at least one await even for small durations.
     """
     run_id = get_run_id()
-    slice_time = 0.1
-    total = int(seconds / slice_time)
 
-    for _ in range(total):
-        await asyncio.sleep(slice_time)
+    # Minimum slice granularity
+    slice_time = 0.1
+
+    if seconds <= slice_time:
+        # One-shot sleep with cancel check
+        await asyncio.sleep(seconds)
+        if run_id:
+            await _check_cancellation(run_id)
+        return
+
+    # Multi-slice sleep
+    remaining = seconds
+    while remaining > 0:
+        step = min(slice_time, remaining)
+        await asyncio.sleep(step)
+        remaining -= step
         if run_id:
             await _check_cancellation(run_id)
 
 
 # ----------------------------------------------------------------------
-# PUBLIC: Wrap any agent coroutine with cancellation monitoring
+# PUBLIC: Inject cancellation awareness into ANY coroutine
+# ----------------------------------------------------------------------
+async def _inject_yield():
+    """
+    Ensures at least one event-loop switch before/after user coroutine.
+    Important because some agent code may start running synchronously
+    before the runtime can notice a cancel request.
+    """
+    await asyncio.sleep(0)
+
+
+# ----------------------------------------------------------------------
+# PUBLIC: cancellation-guard wrapper
 # ----------------------------------------------------------------------
 async def cancellation_guard(coro, run_id: str, step_index: int):
     """
-    Wrap agent execution so cancellation is detected BEFORE, DURING, AFTER.
+    • Checks cancel BEFORE starting user coroutine
+    • Forces a yield to ensure runtime has time to read cancel file
+    • Awaits the coroutine
+    • Checks cancel AFTER execution
 
-    • Checks cancel before coroutine starts
-    • Checks cancel after every await (via th_sleep)
-    • If cancelled, stops chain cleanly with asyncio.CancelledError
+    The agent itself must use th_sleep() for mid-work checks.
     """
-    # Before execution
+    # Pre-cancel
     await _check_cancellation(run_id)
+
+    # Yield so FS cancel markers can be observed before agent code enters heavy loop
+    await _inject_yield()
 
     try:
         result = await coro
@@ -55,7 +80,7 @@ async def cancellation_guard(coro, run_id: str, step_index: int):
         print(f"[cancellation_guard] CANCELLED at step={step_index}, run_id={run_id}")
         raise
 
-    # After execution
+    # Post-cancel
     await _check_cancellation(run_id)
 
     return result

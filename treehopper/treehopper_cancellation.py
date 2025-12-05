@@ -1,4 +1,3 @@
-# treehopper/treehopper_cancellation.py
 """
 Filesystem-only cancellation module.
 
@@ -12,6 +11,7 @@ Marker shape:
   "modified_by": ["cli:PID", "runtime:PID"]
 }
 """
+
 import os
 import json
 import time
@@ -19,77 +19,106 @@ import asyncio
 from pathlib import Path
 from typing import Optional, Dict, Any, Set
 
-from treehopper.th_config import (
-    CANCEL_DIR,
-    # TH_ROOT,
-    # RUNTIME_DIR,
-    # CHAIN_PID_PREFIX
-)
+from treehopper.th_config import CANCEL_DIR
 
-# ensure cancel dir exists
+# Ensure cancel dir exists
 CANCEL_DIR.mkdir(parents=True, exist_ok=True)
 
-# In-memory helpers (non-authoritative caches for local process speed)
+# -----------------------------------------------------------------------------
+# In-memory soft cache (not authoritative, but speeds local queries)
+# -----------------------------------------------------------------------------
 _REG_LOCK = asyncio.Lock()
 ACTIVE_TASKS: Dict[str, asyncio.Task] = {}
 ACTIVE_CHAIN_TASKS: Dict[str, Set[str]] = {}
 ACTIVE_BATCH_TASKS: Dict[str, Set[str]] = {}
+
+# “True” means marker exists; deletion is never expected, so no False values.
 CANCEL_FLAGS: Dict[str, bool] = {}
 
 
-# ---------------------------------------------------------------------
-# File helpers
-# ---------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Helper paths & IO
+# -----------------------------------------------------------------------------
 def _cancel_path_for(run_id: str) -> Path:
-    safe = f"{run_id}.cancel"
-    return CANCEL_DIR / safe
+    return CANCEL_DIR / f"{run_id}.cancel"
 
 
 def _atomic_write(path: Path, data: str) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_suffix(".tmp")
     tmp.write_text(data, encoding="utf-8")
-    tmp.replace(path)
+    tmp.replace(path)  # atomic on POSIX
 
 
 def _read_json(path: Path) -> Optional[Dict[str, Any]]:
     try:
-        t = path.read_text(encoding="utf-8")
-        return json.loads(t)
+        txt = path.read_text(encoding="utf-8")
+        return json.loads(txt)
     except Exception:
         return None
 
 
-# ---------------------------------------------------------------------
-# Marker creation / update
-# ---------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Local cache setter (safe from both inside/outside loop)
+# -----------------------------------------------------------------------------
+def _set_local_flag_sync(run_id: str):
+    CANCEL_FLAGS[run_id] = True
+
+
+async def _set_local_flag_async(run_id: str):
+    async with _REG_LOCK:
+        CANCEL_FLAGS[run_id] = True
+
+
+def _schedule_local_flag(run_id: str):
+    """Attempt async set; fall back to sync if no running loop."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_set_local_flag_async(run_id))
+    except RuntimeError:
+        _set_local_flag_sync(run_id)
+
+
+# -----------------------------------------------------------------------------
+# Marker creation/update
+# -----------------------------------------------------------------------------
 def create_cancel_marker(
-    run_id: str, source: str = "cli", modifier: Optional[str] = None
+    run_id: str,
+    source: str = "cli",
+    modifier: Optional[str] = None,
 ) -> Path:
     """
     Create or update the cancel marker for run_id.
-    Returns the Path to the marker file.
+    - Ensures earliest cancelled_at wins.
+    - Maintains a stable 'modified_by' list without duplicates.
     """
     p = _cancel_path_for(run_id)
     now = time.time()
-    # load existing if present
+
     existing = _read_json(p) if p.exists() else None
 
-    if existing:
-        # keep earliest cancelled_at
-        cancelled_at = existing.get("cancelled_at", now) or now
-        cancelled_at = (
-            float(cancelled_at) if isinstance(cancelled_at, (int, float)) else now
-        )
-        if cancelled_at > now:
+    # Determine cancelled_at
+    if existing and "cancelled_at" in existing:
+        try:
+            old = float(existing["cancelled_at"])
+            cancelled_at = min(old, now)
+        except Exception:
             cancelled_at = now
-        source_final = existing.get("source") or source
-        modified_by = list(existing.get("modified_by", []))
     else:
         cancelled_at = now
-        source_final = source
-        modified_by = []
 
-    # modifier label
+    # Determine source
+    source_final = existing.get("source") if existing else source
+    if not source_final:
+        source_final = source
+
+    # Determine modified_by list
+    modified_by = []
+    if existing:
+        mb = existing.get("modified_by")
+        if isinstance(mb, list):
+            modified_by = list(mb)
+
+    # Apply modifier tag
     if not modifier:
         modifier = f"{source}:{os.getpid()}"
     if modifier not in modified_by:
@@ -102,126 +131,114 @@ def create_cancel_marker(
         "modified_by": modified_by,
     }
 
+    # Atomic write
     try:
         _atomic_write(p, json.dumps(payload))
     except Exception:
-        # best-effort
         p.write_text(json.dumps(payload), encoding="utf-8")
 
-    # set quick in-memory flag for local processes
-    async def _set_local_flag():
-        async with _REG_LOCK:
-            CANCEL_FLAGS[run_id] = True
-
-    try:
-        # fire-and-forget safe
-        asyncio.get_running_loop().create_task(_set_local_flag())
-    except Exception:
-        # not inside loop - ignore
-        pass
+    # Update local cache
+    _schedule_local_flag(run_id)
 
     return p
 
 
 def update_cancel_marker_with_runtime(
-    run_id: str, runtime_tag: Optional[str] = None
+    run_id: str,
+    runtime_tag: Optional[str] = None,
 ) -> Optional[Path]:
     """
-    Runtime-side update when receiving notify: append runtime tag to modified_by.
-    Creates file if missing (so CLI or API can create later).
+    Runtime receives a cancel notification:
+    - Appends its runtime tag
+    - Creates a marker if missing
     """
     p = _cancel_path_for(run_id)
+    now = time.time()
+
+    obj = _read_json(p) if p.exists() else None
     modifier = runtime_tag or f"runtime:{os.getpid()}"
+
+    if not obj:
+        # Fresh marker by runtime
+        obj = {
+            "run_id": run_id,
+            "cancelled_at": now,
+            "source": "runtime",
+            "modified_by": [],
+        }
+
+    # Clean & append modifier
+    mb = obj.get("modified_by")
+    if not isinstance(mb, list):
+        mb = []
+    if modifier not in mb:
+        mb.append(modifier)
+    obj["modified_by"] = mb
+
+    if "cancelled_at" not in obj:
+        obj["cancelled_at"] = now
+    if "source" not in obj:
+        obj["source"] = "runtime"
+
     try:
-        if p.exists():
-            obj = _read_json(p) or {}
-        else:
-            obj = {
-                "run_id": run_id,
-                "cancelled_at": time.time(),
-                "source": "runtime",
-                "modified_by": [],
-            }
-        if "modified_by" not in obj or not isinstance(obj["modified_by"], list):
-            obj["modified_by"] = list(obj.get("modified_by") or [])
-        if modifier not in obj["modified_by"]:
-            obj["modified_by"].append(modifier)
-        # keep cancelled_at (if absent set now)
-        if "cancelled_at" not in obj:
-            obj["cancelled_at"] = time.time()
-        if "source" not in obj:
-            obj["source"] = "runtime"
         _atomic_write(p, json.dumps(obj))
-        # update local cache
-        try:
-            asyncio.get_running_loop().create_task(
-                _set_local_flag_for(run_id=True, run_id_arg=run_id)
-            )
-        except Exception:
-            pass
-        return p
     except Exception:
-        return None
+        try:
+            p.write_text(json.dumps(obj), encoding="utf-8")
+        except Exception:
+            return None
+
+    _schedule_local_flag(run_id)
+    return p
 
 
-async def _set_local_flag_for(run_id: bool = False, run_id_arg: Optional[str] = None):
-    async with _REG_LOCK:
-        if run_id_arg:
-            CANCEL_FLAGS[run_id_arg] = True
-
-
-# ---------------------------------------------------------------------
-# Read / Query
-# ---------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Query
+# -----------------------------------------------------------------------------
 async def is_run_cancelled(run_id: str) -> bool:
     """
-    Returns True if a cancel marker exists for run_id.
-    Fast path: uses in-memory flag; otherwise reads CANCEL_DIR file.
+    Deterministic check:
+    - First check in-memory cache
+    - Fallback to FS
     """
-    # quick in-memory check
+    # Fast in-memory path
     async with _REG_LOCK:
-        if CANCEL_FLAGS.get(run_id, False):
+        if CANCEL_FLAGS.get(run_id):
             return True
 
-    # check filesystem (in threadpool)
-    def _sync_check():
+    # FS path
+    def _fs_check() -> bool:
         p = _cancel_path_for(run_id)
         if not p.exists():
             return False
-        try:
-            obj = _read_json(p)
-            if not obj:
-                return False
-            # presence of cancelled_at is sufficient
-            if obj.get("cancelled_at"):
-                return True
+        obj = _read_json(p)
+        if not obj:
             return False
-        except Exception:
-            return False
+        return bool(obj.get("cancelled_at"))
 
     try:
-        return await asyncio.to_thread(_sync_check)
+        return await asyncio.to_thread(_fs_check)
     except Exception:
         return False
 
 
-# ---------------------------------------------------------------------
-# Register / unregister tasks (for runtime-local cancellation of in-process tasks)
-# ---------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Runtime task registry (local process only)
+# -----------------------------------------------------------------------------
 async def register_task(run_id: str, chain_id: str, batch_id: Optional[str] = None):
     async with _REG_LOCK:
         task = asyncio.current_task()
-        if task is None:
+        if not task:
             raise RuntimeError("No current asyncio task to register")
         ACTIVE_TASKS[run_id] = task
-        if chain_id:
-            ACTIVE_CHAIN_TASKS.setdefault(chain_id, set()).add(run_id)
+
+        ACTIVE_CHAIN_TASKS.setdefault(chain_id, set()).add(run_id)
         if batch_id:
             ACTIVE_BATCH_TASKS.setdefault(batch_id, set()).add(run_id)
 
 
 async def unregister_task(
-    run_id: str, chain_id: Optional[str] = None, batch_id: Optional[str] = None
+    run_id: str, chain_id: Optional[str], batch_id: Optional[str]
 ):
     async with _REG_LOCK:
         ACTIVE_TASKS.pop(run_id, None)
@@ -235,46 +252,44 @@ async def unregister_task(
 async def cancel_chain_id(chain_id: str) -> int:
     async with _REG_LOCK:
         run_ids = list(ACTIVE_CHAIN_TASKS.get(chain_id, set()))
-    count = 0
     for rid in run_ids:
         create_cancel_marker(rid, source="cli")
-        count += 1
-    return count
+    return len(run_ids)
 
 
 async def cancel_batch(batch_id: str) -> int:
     async with _REG_LOCK:
         run_ids = list(ACTIVE_BATCH_TASKS.get(batch_id, set()))
-    count = 0
     for rid in run_ids:
         create_cancel_marker(rid, source="cli")
-        count += 1
-    return count
+    return len(run_ids)
 
 
-# ---------------------------------------------------------------------
-# run_with_cancellation: lightweight wrapper kept for compatibility
-# ---------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# run_with_cancellation — compatibility wrapper
+# -----------------------------------------------------------------------------
 async def run_with_cancellation(
     run_id: str, chain_id: str, batch_id: Optional[str], coro
 ):
     """
-    Wrap caller coroutine to ensure registration and cleanup.
-    Actual cancellation detection is provided by is_run_cancelled() / cancellation_guard.
+    Lightweight wrapper.
+    Cancellation is enforced via: is_run_cancelled() + cancellation_guard.
     """
     try:
         await register_task(run_id, chain_id, batch_id)
-        # PRE-check
+
+        # Pre-cancel
         if await is_run_cancelled(run_id):
             return {"cancelled": True, "results": []}
 
-        # execute the coroutine (caller should be cancellation-aware)
         result = await coro
 
-        # POST-check
+        # Post-cancel
         if await is_run_cancelled(run_id):
             return {"cancelled": True, "results": []}
+
         return result
+
     except asyncio.CancelledError:
         return {
             "run_id": run_id,
@@ -283,5 +298,6 @@ async def run_with_cancellation(
             "results": [{"error": "execution cancelled"}],
             "success": False,
         }
+
     finally:
         await unregister_task(run_id, chain_id, batch_id)

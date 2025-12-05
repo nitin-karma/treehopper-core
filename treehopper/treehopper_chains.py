@@ -15,6 +15,7 @@ import requests
 import yaml
 import asyncio
 import hashlib
+from treehopper.agent_runtime import run_agent_path as _run_agent_path_local
 from treehopper.treehopper_cancellation import (
     cancel_chain_id,
     cancel_batch,
@@ -587,15 +588,19 @@ def chain_run_detached(
     if batch_id:
         headers["X-Treehopper-Batch-Id"] = batch_id
 
-    r = requests.post(url, json=payload or {}, headers=headers)
+    # ----------------------------------------------------------------------
+    # 🔥 Minimal Patch:
+    #   Fire-and-forget JSON POST using curl in a background subprocess.
+    #   CLI returns immediately, chain runtime logs progress independently.
+    #   No blocking → cancellation polling becomes correct.
+    # ----------------------------------------------------------------------
+    _post_runtime_detached(
+        url=url, payload=payload or {}, headers=headers  # ← dict, NOT json.dumps
+    )
 
-    try:
-        data = r.json()
-        print(f"Chain Runtime json response - {data}")
-    except ValueError:
-        print("❌ Error parsing runtime JSON response")
-        print(r.text)
-        return
+    print(f"🚀 Detached chain triggered → run_id={run_id}")
+    print(f"📡 Runtime executing independently at http://localhost:{actual_port}")
+    print(f"📁 Track status via JSON at: {chain_ref.dir_path}/runs/{run_id}.json")
 
     print(f"RUN_ID: {run_id}")
 
@@ -634,6 +639,7 @@ def chain_delete(ref: str) -> None:
     ensure_registry_dirs()
     chain_ref = resolve_chain(ref)
 
+    # Confirm deletion
     confirm = input(
         f"⚠️ Delete chain '{chain_ref.chain_name}' ({chain_ref.chain_id}) permanently? y/N: "
     )
@@ -641,31 +647,38 @@ def chain_delete(ref: str) -> None:
         print("❎ Cancelled")
         return
 
-    # stop runtime if any
     pid_file = RUNTIME_DIR / f"{CHAIN_PID_PREFIX}{chain_ref.chain_id}.pid"
     pid = read_pid(pid_file)
+
     print(
         f"[chains] DELETE requested for chain={chain_ref.chain_name} id={chain_ref.chain_id}"
     )
     print(f"[chains] run directory = {chain_ref.dir_path}")
+
+    # Stop runtime if alive
     if pid:
         print(f"🛑 Stopping chain runtime PID {pid} before delete...")
         kill_pid(pid)
         pid_file.unlink(missing_ok=True)
 
-    # remove directory
+    # Remove directory recursively
     if chain_ref.dir_path.exists():
-        for p in chain_ref.dir_path.rglob("*"):
-            if p.is_file():
-                p.unlink()
-        chain_ref.dir_path.rmdir()
+        import shutil
 
-    # remove from index
+        shutil.rmtree(chain_ref.dir_path)
+        print("🗑 Chain directory removed")
+
+    # Remove chain entry from index
     index = load_chains_index()
     index = [c for c in index if c["chain_id"] != chain_ref.chain_id]
     save_chains_index(index)
+    print("📦 Chain removed from registry index")
 
-    print(f"🗑 Deleted chain '{chain_ref.chain_name}' ({chain_ref.chain_id})")
+    # Clean up stray cancel markers
+    for cancel_file in CANCEL_DIR.glob(f"{chain_ref.chain_name}-*.cancel"):
+        cancel_file.unlink(missing_ok=True)
+
+    print(f"✔ Deleted chain '{chain_ref.chain_name}' ({chain_ref.chain_id})")
 
 
 def chain_logs(ref: str) -> None:
@@ -697,9 +710,11 @@ def resume_run(run_id: str) -> None:
     Behavior:
       - Look up run file under CHAINS_DIR/*/runs/<run_id>.json
       - Load chain.yaml for that chain
-      - Determine current_step_index (None => start from 0)
-      - Execute remaining steps sequentially via MAIN server chain endpoint (or start micro-app if detached)
-      - Update run history using run_registry.record_chain_run (keep same run_id)
+      - Determine current_step_index (None => 0) and re-run that step
+        (Option B semantics: always re-run the current/incomplete step)
+      - Execute remaining steps sequentially via MAIN server chain endpoint
+        (or call agents directly), updating run history using run_registry.record_chain_run
+        (keep same run_id).
     """
     # 1) find run file
     found = None
@@ -715,14 +730,30 @@ def resume_run(run_id: str) -> None:
     chain_dir, run_file = found
     history = json.loads(run_file.read_text())
 
-    # don't resume cancelled or completed
-    if history.get("cancelled") or history.get("status") == "completed":
-        print("❌ Run is cancelled or already completed — not resuming")
+    # canonical fields
+    cancelled = history.get("cancelled", False)
+    status = history.get("status")
+
+    # Do NOT resume already completed runs
+    if status == "completed":
+        print("❌ Run already completed — not resuming")
         return
+
+    # Determine resume start index:
+    # Option B: re-run the 'current_step_index' if it is >= 0.
+    # If current_step_index is missing or -1 (pending), start from 0.
+    raw_idx = history.get("current_step_index", -1)
+    if isinstance(raw_idx, int) and raw_idx >= 0:
+        start_idx = raw_idx
+    else:
+        start_idx = 0
+
+    print(
+        f"ℹ️ Resuming run {run_id} (cancelled={cancelled}) starting at step {start_idx}..."
+    )
 
     cfg = yaml.safe_load((chain_dir / "chain.yaml").read_text())
     agents = cfg.get("agents", [])
-    start_idx = history.get("current_step_index", -1) + 1  # next step
     payload = history.get("input", {})
 
     # If run was detached, resume via dedicated micro-app if possible
@@ -732,12 +763,16 @@ def resume_run(run_id: str) -> None:
     chain_id = cfg["chain_id"]
 
     # function to run a step locally (calling agent path)
-    from treehopper.treehopper import (
-        _run_agent_path as _run_agent_path_local,
-        # get_chain_id,
-    )
+    # Use local agent runner which matches chain runtime behavior
+    # from treehopper.agent_runtime import run_agent_path as _run_agent_path_local
 
-    results = history.get("results", [])
+    results = history.get("results", []) or []
+
+    # If results exist but we plan to re-run an earlier step, trim results to start_idx
+    # For example: if results has entries for steps 0..i but run was marked `current_step_index = i`,
+    # we re-run step i and should drop any results[i:] to avoid duplicated downstream inputs.
+    if len(results) > start_idx:
+        results = results[:start_idx]
 
     for idx in range(start_idx, len(agents)):
         step = agents[idx]
@@ -757,7 +792,7 @@ def resume_run(run_id: str) -> None:
             else:
                 params = dict(prev)
 
-        # checkpoint running
+        # checkpoint running (mark step idx as running)
         run_registry_mod.record_chain_run(
             chain_name=chain_name,
             chain_id=chain_id,
@@ -775,6 +810,7 @@ def resume_run(run_id: str) -> None:
             # call agent directly (same as _run_agent_path)
             res = asyncio.run(_run_agent_path_local(path, params))
         except Exception as e:
+            # record failure
             run_registry_mod.record_chain_run(
                 chain_name=chain_name,
                 chain_id=chain_id,
@@ -904,9 +940,6 @@ Other Commands
 
 
 def _post_runtime_detached(url: str, payload: dict, headers: dict):
-    """
-    Fire-and-forget POST using curl so CLI never blocks waiting for runtime.
-    """
     cmd = [
         "curl",
         "-s",
@@ -914,7 +947,9 @@ def _post_runtime_detached(url: str, payload: dict, headers: dict):
         "POST",
         url,
         "-H",
-        f"x-api-key: {headers.get('x-api-key')}",
+        f"x-api-key: {headers['x-api-key']}",
+        "-H",
+        f"X-Treehopper-Run-Id: {headers['X-Treehopper-Run-Id']}",
         "-H",
         "Content-Type: application/json",
         "-d",

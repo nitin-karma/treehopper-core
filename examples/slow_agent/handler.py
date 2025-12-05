@@ -14,25 +14,24 @@ agent_id = get_agent_id(agent_name)
 async def handle(payload: SlowAgentRequest = Body(...)):
     run_id = get_run_id()
 
-    # 1️⃣ READY signal (industry-standard early ACK)
+    # 1) READY signal: early ACK so test harness can poll status safely
     print("[slow_agent] READY")
 
-    # Give event loop a moment to process FS cancel file
-    await th_sleep(0)  # yields control, no artificial delay
+    # yield control so filesystem / runtime can create cancel marker or update status
+    await th_sleep(0)
 
-    # 2️⃣ Cancel BEFORE starting main loop
+    # quick pre-check
     if run_id and await is_run_cancelled(run_id):
         print("[slow_agent] CANCEL detected BEFORE starting work")
         raise asyncio.CancelledError()
 
     print("[slow_agent] Step1 starting...")
 
-    # 3️⃣ Main loop
-    for i in range(100):
-        print(f"[slow_agent] working... {i+1}/5")
-
+    # do work, responsive to cancellation via th_sleep
+    for i in range(20):
+        print(f"[slow_agent] working... {i+1}/20")
         try:
-            await th_sleep(1)  # auto checks cancel at await boundaries
+            await th_sleep(0.2)
         except asyncio.CancelledError:
             print("[slow_agent] CANCEL detected DURING work")
             raise

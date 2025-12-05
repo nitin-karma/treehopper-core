@@ -5,6 +5,7 @@ if os.getenv("TREEHOPPER_RUNTIME_MODE") == "1":
     CHROMA_DISABLED = True
 else:
     CHROMA_DISABLED = False
+from datetime import datetime
 import sys
 import traceback
 from pathlib import Path
@@ -39,7 +40,7 @@ from treehopper.th_config import (
     # REMOVED: HOME,
     # REMOVED: TH_ROOT,
     REGISTRY_AGENTS,
-    # REMOVED: REGISTRY_DIR,
+    REGISTRY_DIR,
     REGISTRY_AGENTS_INDEX,
     CHAINS_DIR,
     CHAINS_INDEX,
@@ -152,7 +153,7 @@ def agent(
         # Build a runtime wrapper that accepts a dict of params and calls the original func
         async def handler_for_runtime(params: dict):
             """
-            Called by runtime (_run_agent_path). Receives a dict `params`
+            Called by runtime (run_agent_path). Receives a dict `params`
             built from chain inputs. This function:
               - Instantiates the pydantic model if declared
               - Calls the original handler as orig(payload=model_instance)
@@ -336,57 +337,99 @@ async def list_chains():
     return results
 
 
+# ===============================================================
+# GLOBAL RUN STATUS ENDPOINT  (MAIN SERVER)
+# ===============================================================
+
+
+@router_chains.get("/status/{run_id}")
+async def global_run_status(run_id: str):
+    """
+    Global lookup: Searches all chain run folders in ~/.treehopper/registry/chains/*
+    and returns unified structured status info.
+    """
+    registry_chains = Path(REGISTRY_DIR) / "chains"
+
+    if not registry_chains.exists():
+        return {"ok": False, "error": "registry_missing", "run_id": run_id}
+
+    # search all chains
+    for chain_folder in registry_chains.glob("*"):
+        run_file = chain_folder / "runs" / f"{run_id}.json"
+        if run_file.exists():
+            try:
+                data = json.loads(run_file.read_text())
+                stat = run_file.stat()
+                return {
+                    "ok": True,
+                    "run_id": run_id,
+                    "chain_name": data.get("chain_name"),
+                    "chain_id": data.get("chain_id"),
+                    "status": data.get("status"),
+                    "current_step_index": data.get("current_step_index"),
+                    "cancelled": data.get("cancelled", False),
+                    "success": data.get("success", False),
+                    "last_updated": datetime.utcfromtimestamp(stat.st_mtime).isoformat()
+                    + "Z",
+                    "raw": data,
+                }
+            except Exception as e:
+                return {"ok": False, "error": f"parse_failure: {e}", "run_id": run_id}
+
+    return {"ok": False, "error": "run_not_found", "run_id": run_id}
+
+
 # -------------------------------------------------------
 # CORE: _run_agent_path (used by chain runtime)
 # -------------------------------------------------------
-async def _run_agent_path(path: str, params: dict):
-    print("[MAIN RUN TIME] Agent execution from main server")
-    """
-    Called by chain runtime app. Uses AGENT_PATH_MAP to find the runtime wrapper.
-    Ensures cancellation BEFORE and AFTER calling the handler.
-    """
-    import asyncio
-    from treehopper.runtime_context import get_run_id
-    from treehopper.treehopper_cancellation import is_run_cancelled
+# async def _run_agent_path(path: str, params: dict):
+#     print("[MAIN RUN TIME] Agent execution from main server")
+#     """
+#     Called by chain runtime app. Uses AGENT_PATH_MAP to find the runtime wrapper.
+#     Ensures cancellation BEFORE and AFTER calling the handler.
+#     """
+#     import asyncio
+#     from treehopper.runtime_context import get_run_id
+#     from treehopper.treehopper_cancellation import is_run_cancelled
 
-    # Normalize path forms to full_path
-    if not path.startswith("/api/v1/agents/"):
-        path = f"/api/v1/agents{path if path.startswith('/') else '/' + path}"
+#     # Normalize path forms to full_path
+#     if not path.startswith("/api/v1/agents/"):
+#         path = f"/api/v1/agents{path if path.startswith('/') else '/' + path}"
 
-    if path not in AGENT_PATH_MAP:
-        raise RuntimeError(f"Agent path not found: {path}")
+#     if path not in AGENT_PATH_MAP:
+#         raise RuntimeError(f"Agent path not found: {path}")
 
-    wrapper = AGENT_PATH_MAP[path]["handler"]
+#     wrapper = AGENT_PATH_MAP[path]["handler"]
 
-    # 1) cancellation check BEFORE call
-    run_id = get_run_id()
-    if run_id:
-        cancelled = await is_run_cancelled(run_id)
-        if cancelled:
-            print(f"[treehopper:_run_agent_path] CANCEL detected BEFORE calling {path}")
-            raise asyncio.CancelledError()
+#     # 1) cancellation check BEFORE call
+#     run_id = get_run_id()
+#     if run_id:
+#         cancelled = await is_run_cancelled(run_id)
+#         if cancelled:
+#             print(f"[treehopper:_run_agent_path] CANCEL detected BEFORE calling {path}")
+#             raise asyncio.CancelledError()
 
-    # 2) execute wrapper (which will instantiate Pydantic model and call original handler)
-    try:
-        result = await wrapper(params)
-    except asyncio.CancelledError:
-        print(f"[treehopper:_run_agent_path] CANCELLED WHILE executing {path}")
-        raise
-    except Exception as e:
-        print(f"[treehopper:_run_agent_path] ERROR executing {path}: {e}")
-        traceback.print_exc()
-        raise
+#     # 2) execute wrapper (which will instantiate Pydantic model and call original handler)
+#     try:
+#         result = await wrapper(params)
+#     except asyncio.CancelledError:
+#         print(f"[treehopper:_run_agent_path] CANCELLED WHILE executing {path}")
+#         raise
+#     except Exception as e:
+#         print(f"[treehopper:_run_agent_path] ERROR executing {path}: {e}")
+#         traceback.print_exc()
+#         raise
 
-    # 3) cancellation check AFTER call (some handlers might take long to return)
-    if run_id:
-        cancelled = await is_run_cancelled(run_id)
-        if cancelled:
-            print(
-                f"[treehopper:_run_agent_path] CANCEL detected AFTER executing {path}"
-            )
-            raise asyncio.CancelledError()
+#     # 3) cancellation check AFTER call (some handlers might take long to return)
+#     if run_id:
+#         cancelled = await is_run_cancelled(run_id)
+#         if cancelled:
+#             print(
+#                 f"[treehopper:_run_agent_path] CANCEL detected AFTER executing {path}"
+#             )
+#             raise asyncio.CancelledError()
 
-    return result
+#     return result
 
 
 # -------------------------------------------------------
