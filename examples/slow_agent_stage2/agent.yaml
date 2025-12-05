@@ -1,0 +1,13 @@
+agent_name: slow_agent_stage2
+agent_id: slow_agent_stage2-d9842413
+subscription_id: a75110fc-0cec-45fc-8ca7-edfe63744497
+entrypoint: /slow_agent_stage2
+description: slow_agent_stage2 agent
+inputs:
+- name: step1_output
+  type: string
+outputs:
+- name: final_message
+  type: string
+tags: []
+version: '1.0'

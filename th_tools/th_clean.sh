@@ -23,6 +23,8 @@ if [[ $YES -ne 1 ]]; then
   echo "   • ~/.treehopper/registry/agents + agents.json"
   echo "   • ~/.treehopper/registry/chains + chains.json"
   echo "   • ~/.treehopper/registry/shared"
+  echo "   • ~/.treehopper/runtime/cancels"
+  echo "   • ~/.treehopper/runtime/cancellation.db"
   echo "   • ~/.treehopper/runtime/*.pid"
   echo "   • ~/.treehopper/runtime/*.log"
   echo "🚫 subscription_id.txt will NOT be deleted"
@@ -73,6 +75,12 @@ rm -f "$TH_ROOT/registry/chains.json"
 
 echo "🗑 Removing shared uploads..."
 rm -rf "$TH_ROOT/registry/shared"
+
+echo "🗑 Removing cancels job logs..."
+rm -rf "$TH_ROOT/runtime/cancels"
+
+echo "🗑 Removing cancellation.db ..."
+rm -rf "$TH_ROOT/runtime/cancellation.db"
 
 echo ""
 echo "🚫 Preserved: $TH_ROOT/subscription_id.txt"

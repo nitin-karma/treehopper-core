@@ -1,12 +1,40 @@
-import json
 import os
+import sys
+from pathlib import Path
+from treehopper.th_config import (
+    API_KEY,
+    BASE_URL,
+    # HOME,
+    # TH_ROOT,
+    REGISTRY_DIR,
+    REGISTRY_AGENTS,
+    REGISTRY_AGENTS_INDEX,
+    SUBSCRIPTION_FILE,
+    RUNTIME_DIR,
+    MAIN_PID_FILE,
+    CHAIN_PID_PREFIX,
+)
+
+# ==============================================================================
+# GLOBAL OVERRIDE FOR DEVELOPMENT
+# Make CLI always import local treehopper source first (instead of pip package)
+# ==============================================================================
+if os.getenv("TREEHOPPER_FORCE_LOCAL", "1") == "1":
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]  # /treehopper-core/treehopper
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT))
+
+    print(f"[FORCE_LOCAL] Treehopper CLI using local source at: {PROJECT_ROOT}")
+    print(f"[FORCE_LOCAL] sys.path[0] = {sys.path[0]}")
+
+# ==============================================================================
+
+import json
 import re
 import shutil
 import subprocess
-import sys
 import time
 import uuid
-from pathlib import Path
 import ast
 from typing import List
 import requests
@@ -20,21 +48,37 @@ import signal
 
 load_dotenv()
 
-API_KEY = {"x-api-key": "demo-key-123"}
-BASE_URL = "http://localhost:1567"
-PROD = os.getenv("PROD", "0") == "1"  # 🔥 ADD THIS LINE
-HOME = Path.home()
-TH_ROOT = HOME / ".treehopper"
-REGISTRY_DIR = TH_ROOT / "registry"
-REGISTRY_AGENTS = REGISTRY_DIR / "agents"
-REGISTRY_AGENTS_INDEX = REGISTRY_DIR / "agents.json"
-SUBSCRIPTION_FILE = TH_ROOT / "subscription_id.txt"
 
 PACKAGE_AGENTS_DIR = Path(__file__).parent / "agents"
+PROD = os.getenv("PROD", "0") == "1"  # 🔥 ADD THIS LINE
 
-RUNTIME_DIR = TH_ROOT / "runtime"
-MAIN_PID_FILE = RUNTIME_DIR / "main_server.pid"
-CHAIN_PID_PREFIX = "det_chain_"
+
+# ------------------------------------------------------------------------------
+# DEV MODE — GUARD: Inject local project root into PYTHONPATH only when needed
+# ------------------------------------------------------------------------------
+def maybe_inject_dev_pythonpath(env: dict):
+    """
+    Inject local source path into PYTHONPATH for dev-mode ONLY.
+    - Activated when TREEHOPPER_DEV_MODE=1 in env of parent or child.
+    - Safe: silently ignored if treehopper.environment doesn't exist.
+    """
+
+    # Pass treehopper-dev flag down to subprocess
+    if os.getenv("TREEHOPPER_DEV_MODE") == "1":
+        env["TREEHOPPER_DEV_MODE"] = "1"
+
+    # Only inject when opted-in
+    if env.get("TREEHOPPER_DEV_MODE") != "1":
+        return env
+
+    try:
+        from treehopper.environment import inject_pythonpath
+
+        inject_pythonpath(env)
+    except Exception:
+        pass
+
+    return env
 
 
 # ---------------------------------------------------------------------
@@ -178,6 +222,8 @@ def run(
         print(f"🚀 Starting Treehopper in background on port {th_port}")
         env = os.environ.copy()
         env["PROD"] = "1"
+        # Inject PYTHONPATH only in dev mode
+        env = maybe_inject_dev_pythonpath(env)
 
         proc = subprocess.Popen(
             [
@@ -234,6 +280,9 @@ def restart(th_port: int = 1567) -> None:
     # 3️⃣ Start server
     env = os.environ.copy()
     env["PROD"] = "1"
+    # Inject PYTHONPATH only in dev mode
+    env = maybe_inject_dev_pythonpath(env)
+
     subprocess.Popen(["treehopper", "run", "--bg"], env=env)
 
     # 4️⃣ Wait for server to pass health check
@@ -817,6 +866,7 @@ def agent_run_detached(
     env = os.environ.copy()
     env["PROD"] = "1"
     env["AGENT_NAME"] = meta["agent_name"]
+    env = maybe_inject_dev_pythonpath(env)
 
     LOG_FILE = RUNTIME_DIR / f"agent_{meta['agent_name']}-{agent_id}.log"
 

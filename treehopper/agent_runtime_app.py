@@ -5,7 +5,8 @@ from fastapi import FastAPI, Body, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from treehopper.treehopper import _run_agent_path, VERSION
+from treehopper.agent_runtime import run_agent_path
+from treehopper.th_config import VERSION
 
 # from treehopper.utils.ui_assets import inject_branding
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -68,14 +69,14 @@ async def run_agent(payload: Dict[str, Any] = Body(...)):
     agent_path = f"/api/v1/agents/{AGENT_NAME}"
 
     try:
-        result = await _run_agent_path(agent_path, payload or {})
+        result = await run_agent_path(agent_path, payload or {})
     except HTTPException as e:
         # propagate FastAPI HTTP errors as-is
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    # _run_agent_path already normalizes to a dict
+    # run_agent_path already normalizes to a dict
     if isinstance(result, dict):
         return JSONResponse(result)
     return JSONResponse({"value": result})

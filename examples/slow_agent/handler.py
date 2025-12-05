@@ -1,28 +1,40 @@
-# handler.py
 import asyncio
 from fastapi import Body
-from fastapi.responses import JSONResponse
 from treehopper.treehopper import agent, get_agent_id
-from .schema import Slow_agentRequest
+from treehopper.middleware.cancellation_guard import th_sleep
+from treehopper.treehopper_cancellation import is_run_cancelled
+from treehopper.runtime_context import get_run_id
+from .schema import SlowAgentRequest
 
 agent_name = "slow_agent"
 agent_id = get_agent_id(agent_name)
 
 
-class Slow_agentAgent:
-    async def run(self, name: str) -> dict:
-        # ⏳ REAL SLOW OPERATION (10 seconds)
-        for i in range(10):
-            await asyncio.sleep(1)  # wait 1 sec each loop
-            print(f"[slow_agent] working... {i+1}/10")
+@agent("slow_agent", method="POST")
+async def handle(payload: SlowAgentRequest = Body(...)):
+    run_id = get_run_id()
 
-        return {"message": f"Hello {name} from slow_agent agent!"}
+    # 1️⃣ READY signal (industry-standard early ACK)
+    print("[slow_agent] READY")
 
+    # Give event loop a moment to process FS cancel file
+    await th_sleep(0)  # yields control, no artificial delay
 
-@agent(
-    "slow_agent", method="POST", goal="Long-running slow agent for cancellation tests"
-)
-async def handle(payload: Slow_agentRequest = Body(...)):
-    ag = Slow_agentAgent()
-    result = await ag.run(payload.name)
-    return JSONResponse(result)
+    # 2️⃣ Cancel BEFORE starting main loop
+    if run_id and await is_run_cancelled(run_id):
+        print("[slow_agent] CANCEL detected BEFORE starting work")
+        raise asyncio.CancelledError()
+
+    print("[slow_agent] Step1 starting...")
+
+    # 3️⃣ Main loop
+    for i in range(100):
+        print(f"[slow_agent] working... {i+1}/5")
+
+        try:
+            await th_sleep(1)  # auto checks cancel at await boundaries
+        except asyncio.CancelledError:
+            print("[slow_agent] CANCEL detected DURING work")
+            raise
+
+    return {"step1_output": payload.name}

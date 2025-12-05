@@ -12,45 +12,47 @@ authors = [
 ]
 license = { file = "LICENSE" }
 requires-python = ">=3.9"
+
 dependencies = [
-    "fastapi",
-    "uvicorn",
-    "python-dotenv",
-    "requests",
-    "pydantic",
-    "openai",
-    "anthropic",
-    "google-generativeai",
-    "tiktoken",
-    "chromadb",
+    "fastapi>=0.110,<0.115",
+    "uvicorn>=0.20,<0.31",
+    "python-dotenv>=1.0",
+    "requests>=2.31",
+    "pydantic>=2.3,<3.0",
+    "openai>=1.0",
+    "anthropic>=0.20",
+    "google-generativeai>=0.4",
+    "tiktoken>=0.6",
+    "chromadb>=0.4,<0.6",
 ]
 
 [project.urls]
 Homepage = "https://github.com/nitin-karma/treehopper-core"
 Issues = "https://github.com/nitin-karma/treehopper-core/issues"
 
-# CLI command
 [project.scripts]
 treehopper = "treehopper.treehopper_cli:main"
 
-[tool.setuptools]
-# Make Python find the treehopper package and subpackages (agents included)
-packages = ["treehopper"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["treehopper*"]
 
 [tool.setuptools.package-data]
-# Include agents, logo, config files, etc. in the installed package
 treehopper = [
     "agents/*.py",
     "*.json",
     "*.yaml",
     "*.yml",
     "logo/*",
+    "static/*",
+    "templates/*",
 ]
 
 [tool.pytest.ini_options]
 python_files = ["test_*.py"]
 addopts = "-vv --disable-warnings --maxfail=1"
 asyncio_mode = "auto"
-env = ["TH_TEST_MODE=1","PYTEST_CURRENT_TEST=1"]
+env = ["TH_TEST_MODE=1", "PYTEST_CURRENT_TEST=1"]
+
 [mypy]
 ignore_missing_imports = true

@@ -14,8 +14,8 @@ import socket
 import requests
 import yaml
 import asyncio
+import hashlib
 from treehopper.treehopper_cancellation import (
-    cancel_run_id,
     cancel_chain_id,
     cancel_batch,
 )
@@ -26,26 +26,24 @@ from treehopper.utils.shared_files import (
 )
 from treehopper.treehopper_cli import get_or_create_subscription_id
 from treehopper.treehopper_parallel import parallel_chain_run_entry
+from treehopper.utils import run_registry as run_registry_mod
+from treehopper.utils.config import read_pid_and_port
 
-# -----------------------------------------------------------------------------
-# CONSTANTS & PATHS
-# -----------------------------------------------------------------------------
-
-API_KEY = {"x-api-key": "demo-key-123"}
-MAIN_PORT = int(os.getenv("TH_PORT", 1567))
-BASE_URL = f"http://localhost:{MAIN_PORT}"
-
-HOME = Path.home()
-TH_ROOT = HOME / ".treehopper"
-REGISTRY_DIR = TH_ROOT / "registry"
-REGISTRY_AGENTS = REGISTRY_DIR / "agents"
-REGISTRY_AGENTS_INDEX = REGISTRY_DIR / "agents.json"
-
-CHAINS_DIR = REGISTRY_DIR / "chains"
-CHAINS_INDEX = REGISTRY_DIR / "chains.json"
-
-RUNTIME_DIR = TH_ROOT / "runtime"
-CHAIN_PID_PREFIX = "det_chain_"
+from treehopper.th_config import (
+    API_KEY,
+    MAIN_PORT,
+    BASE_URL,
+    # HOME,
+    TH_ROOT,
+    REGISTRY_DIR,
+    # REGISTRY_AGENTS,
+    REGISTRY_AGENTS_INDEX,
+    CHAINS_DIR,
+    CHAINS_INDEX,
+    RUNTIME_DIR,
+    CHAIN_PID_PREFIX,
+    CANCEL_DIR,
+)
 
 
 # -----------------------------------------------------------------------------
@@ -121,13 +119,23 @@ def validate_chain_name(name: str) -> str:
     return clean.lower()
 
 
+# def derive_chain_port(chain_id: str) -> int:
+#     """
+#     Predictable hash-based port:
+#       20000–24999 range based on chain_id.
+#     """
+#     h = abs(hash(chain_id))
+#     return 20000 + (h % 5000)
+
+
 def derive_chain_port(chain_id: str) -> int:
     """
-    Predictable hash-based port:
-      20000–24999 range based on chain_id.
+    Deterministic, stable port mapping for chain runtimes.
+    Uses SHA256 instead of Python's non-deterministic hash().
     """
-    h = abs(hash(chain_id))
-    return 20000 + (h % 5000)
+    h = hashlib.sha256(chain_id.encode()).hexdigest()
+    num = int(h[:6], 16)  # first 3 bytes
+    return 20000 + (num % 5000)
 
 
 def read_pid(path: Path) -> Optional[int]:
@@ -141,19 +149,6 @@ def read_pid(path: Path) -> Optional[int]:
         return int(text)
     except Exception:
         return None
-
-
-def read_pid_and_port(path: Path) -> tuple[Optional[int], Optional[int]]:
-    if not path.exists():
-        return None, None
-    try:
-        text = path.read_text().strip()
-        if ":" in text:
-            pid_str, port_str = text.split(":", 1)
-            return int(pid_str), int(port_str)
-        return int(text), None
-    except Exception:
-        return None, None
 
 
 def write_pid(path: Path, pid: int, port: int | None = None) -> None:
@@ -453,73 +448,105 @@ def chain_run_detached(
     port_override: int | None = None,
     run_once: bool = True,
 ) -> None:
-    """
-    FINAL IMPLEMENTATION:
-      • One runtime per chain_id
-      • pid file stores pid:port
-      • If runtime exists → reuse EXACT port (never compute)
-      • If new runtime → save pid:port
-      • Micro-app writes run history; CLI only prints
-      • If run_once=True → auto-stop runtime after executing
-    """
+
+    ensure_main_server()
 
     cfg = load_chain_cfg(chain_ref)
-    derived_port = derive_chain_port(chain_ref.chain_id)
-
-    # explicit port > derived port
-    intended_port = port_override or derived_port
-
-    # strict: explicit --port cannot be in use
-    if port_override is not None and is_port_in_use(intended_port):
-        print(f"❌ Port {intended_port} is already in use.")
-        sys.exit(1)
+    print(f"chain config : {cfg}")
 
     pid_file = RUNTIME_DIR / f"{CHAIN_PID_PREFIX}{chain_ref.chain_id}.pid"
 
-    # -------- Read existing pid + port --------
+    # Prefer existing runtime port if available
     existing_pid, existing_port = read_pid_and_port(pid_file)
+    if existing_pid and existing_port:
+        actual_port = existing_port
+    else:
+        actual_port = port_override or derive_chain_port(chain_ref.chain_id)
 
-    actual_port: int
-    started_proc = None
+    # ----------------------------------------------------------------------
+    # ALWAYS GENERATE RUN_ID HERE — SINGLE SOURCE OF TRUTH
+    # ----------------------------------------------------------------------
+    run_id = run_registry_mod.make_run_id(chain_ref.chain_name)
+    batch_id = None  # batch mode not used in direct detached run
 
+    # ----------------------------------------------------------------------
+    # Early checkpoint (pending)
+    # ----------------------------------------------------------------------
+    run_registry_mod.record_chain_run(
+        chain_name=chain_ref.chain_name,
+        chain_id=chain_ref.chain_id,
+        chain_dir=chain_ref.dir_path,
+        payload=payload,
+        results=[],
+        detached=True,
+        success=False,
+        run_id=run_id,
+        cancelled=False,
+        status="pending",
+        current_step_index=-1,
+    )
+
+    # ----------------------------------------------------------------------
+    # START RUNTIME IF NOT ALIVE
+    # ----------------------------------------------------------------------
+    existing_pid, existing_port = read_pid_and_port(pid_file)
     if existing_pid:
         try:
-            os.kill(existing_pid, 0)  # check alive
-            # ✔️ ALWAYS use actual running port, not derived
-            actual_port = existing_port or derived_port
-
-            chain_url = f"http://localhost:{actual_port}"
-            print(
-                f"ℹ️ Chain runtime already running for '{chain_ref.chain_name}' "
-                f"(PID {existing_pid}) on {chain_url}"
-            )
-            print(f"📌 POST   {chain_url}/api/v1/{chain_ref.chain_name}/run")
-            print(f"🔍 Health {chain_url}/api/v1/{chain_ref.chain_name}/health")
-
-        except ProcessLookupError:
-            # pid dead → delete stale file
-            pid_file.unlink(missing_ok=True)
+            os.kill(existing_pid, 0)
+            actual_port = existing_port or actual_port
+        except OSError:
+            print("Process is not alive")
             existing_pid = None
 
-    # -------- Start new runtime if not running --------
     if not existing_pid:
-        actual_port = intended_port
-        chain_url = f"http://localhost:{actual_port}"
-
-        print(
-            f"🚀 Starting dedicated chain runtime for '{chain_ref.chain_name}' on {chain_url}"
-        )
-
-        env = os.environ.copy()
-        env["PROD"] = "1"
-        env["CHAIN_NAME"] = chain_ref.chain_name
-        env["CHAIN_ID"] = chain_ref.chain_id
-        env["CHAIN_DIR"] = str(chain_ref.dir_path)
-
         LOG_FILE = (
             RUNTIME_DIR / f"chain_{chain_ref.chain_name}-{chain_ref.chain_id}.log"
         )
 
+        # ======================================================================
+        # 🔥 CRITICAL PATCH — Inject absolute, unified FS paths into runtime
+        # ======================================================================
+        env = os.environ.copy()
+        env["CHAIN_NAME"] = chain_ref.chain_name
+        env["CHAIN_ID"] = chain_ref.chain_id
+        env["CHAIN_DIR"] = str(chain_ref.dir_path)
+        # 🔥 ADD THESE LINES:
+        # from treehopper.treehopper_cancellation import DB_PATH
+        # env["TREEHOPPER_DB_PATH"] = str(DB_PATH.resolve())  # ← Force same DB
+
+        env["PROD"] = "1"
+
+        # Absolute paths — the FIX for cancellation detection
+        env["TREEHOPPER_TH_ROOT"] = str(TH_ROOT.resolve())
+        env["TREEHOPPER_RUNTIME_DIR"] = str(RUNTIME_DIR.resolve())
+        env["TREEHOPPER_CANCEL_DIR"] = str(CANCEL_DIR.resolve())
+
+        # Uvicorn & Python safety
+        env["PYTHONUNBUFFERED"] = "1"  # real-time logs
+        env["UVICORN_WORKERS"] = "1"  # avoid forked workers (breaks FS sync)
+
+        # ----------------------------------------------------------------------
+        # DEV: inject local source into PYTHONPATH for subprocesses (guarded)
+        # ----------------------------------------------------------------------
+        # This is opt-in: set TREEHOPPER_DEV_MODE=1 in your shell / CI env to enable.
+        try:
+            # mark dev-mode for the child process (only when you explicitly opt in)
+            if os.getenv("TREEHOPPER_DEV_MODE") == "1":
+                env["TREEHOPPER_DEV_MODE"] = "1"
+            # import helper if present
+            from treehopper.environment import inject_pythonpath
+
+            # only run injection when dev flag present in environment or parent process
+            if env.get("TREEHOPPER_DEV_MODE") == "1":
+                inject_pythonpath(env)
+        except Exception:
+            # Don't break if the helper isn't available — fallback to default behavior.
+            pass
+        # ----------------------------------------------------------------------
+
+        # ======================================================================
+        # Launch chain runtime
+        # ======================================================================
         proc = subprocess.Popen(
             [
                 "uvicorn",
@@ -533,77 +560,50 @@ def chain_run_detached(
             stdout=open(LOG_FILE, "w"),
             stderr=subprocess.STDOUT,
         )
-        started_proc = proc
 
         write_pid(pid_file, proc.pid, actual_port)
 
-        print(f"📝 Chain runtime logs → {LOG_FILE}")
-
-        # wait for health
+        # Wait for runtime health
         for _ in range(40):
-            time.sleep(0.25)
             try:
                 r = requests.get(
-                    f"{chain_url}/api/v1/{chain_ref.chain_name}/health",
-                    timeout=0.25,
+                    f"http://localhost:{actual_port}/api/v1/{chain_ref.chain_name}/health"
                 )
                 if r.status_code == 200:
-                    print("✅ Chain micro-app runtime healthy")
                     break
-            except Exception:
-                continue
-        else:
-            print("⚠️ Chain micro-app did not report healthy.")
+            except requests.RequestException:
+                pass
+            time.sleep(0.25)
 
-    # -------- Post payload to actual running port --------
+    # ----------------------------------------------------------------------
+    # POST request to runtime with forwarded run_id
+    # ----------------------------------------------------------------------
     url = f"http://localhost:{actual_port}/api/v1/{chain_ref.chain_name}/run"
-    print(f"▶ Executing chain via {url}")
 
-    r = requests.post(url, json=(payload or {}), headers=API_KEY)
+    headers = {
+        "x-api-key": "demo-key-123",
+        "X-Treehopper-Run-Id": run_id,
+    }
+    if batch_id:
+        headers["X-Treehopper-Batch-Id"] = batch_id
+
+    r = requests.post(url, json=payload or {}, headers=headers)
 
     try:
         data = r.json()
-    except Exception:
-        print(f"HTTP {r.status_code}")
+        print(f"Chain Runtime json response - {data}")
+    except ValueError:
+        print("❌ Error parsing runtime JSON response")
         print(r.text)
-
-        if started_proc and run_once:
-            kill_pid(started_proc.pid)
-            pid_file.unlink(missing_ok=True)
         return
 
-    if r.status_code != 200:
-        print(f"HTTP {r.status_code}")
-        print(data)
+    print(f"RUN_ID: {run_id}")
 
-        if started_proc and run_once:
-            kill_pid(started_proc.pid)
+    if run_once:
+        pid = read_pid(pid_file)
+        if pid:
+            kill_pid(pid)
             pid_file.unlink(missing_ok=True)
-        return
-
-    # -------- Print results (history already written by micro-app) --------
-    results = data.get("results", [])
-    run_id = data.get("run_id")
-
-    agents = cfg.get("agents", [])
-    print("📊 Chain step results:")
-    for i, res in enumerate(results):
-        name = agents[i]["agent_name"] if i < len(agents) else f"step_{i}"
-        status = "✓ success" if "error" not in res else f"✗ error: {res['error']}"
-        print(f"  [{name}] {status}")
-
-    print("\n🔍 Run stored by micro-app:")
-    print(f"  run_id = {run_id}")
-
-    print(
-        f"🌐 Chain micro-app runtime still available at: http://localhost:{actual_port}"
-    )
-
-    # -------- Stop if run_once=True --------
-    if run_once and started_proc:
-        kill_pid(started_proc.pid)
-        pid_file.unlink(missing_ok=True)
-        print(f"ℹ️ Chain micro-app stopped after run (PID {started_proc.pid})")
 
 
 # -----------------------------------------------------------------------------
@@ -615,6 +615,10 @@ def chain_stop(ref: str) -> None:
     ensure_registry_dirs()
     chain_ref = resolve_chain(ref)
     pid_file = RUNTIME_DIR / f"{CHAIN_PID_PREFIX}{chain_ref.chain_id}.pid"
+    print(
+        f"[chains] STOP requested for chain={chain_ref.chain_name} id={chain_ref.chain_id}"
+    )
+    print(f"[chains] PID file = {pid_file}")
     pid = read_pid(pid_file)
     if not pid:
         print(f"ℹ️ No running runtime found for chain '{chain_ref.chain_name}'")
@@ -640,6 +644,10 @@ def chain_delete(ref: str) -> None:
     # stop runtime if any
     pid_file = RUNTIME_DIR / f"{CHAIN_PID_PREFIX}{chain_ref.chain_id}.pid"
     pid = read_pid(pid_file)
+    print(
+        f"[chains] DELETE requested for chain={chain_ref.chain_name} id={chain_ref.chain_id}"
+    )
+    print(f"[chains] run directory = {chain_ref.dir_path}")
     if pid:
         print(f"🛑 Stopping chain runtime PID {pid} before delete...")
         kill_pid(pid)
@@ -683,6 +691,123 @@ def chain_logs(ref: str) -> None:
     print(json.dumps(data, indent=2))
 
 
+def resume_run(run_id: str) -> None:
+    """
+    Resume an interrupted run by run_id.
+    Behavior:
+      - Look up run file under CHAINS_DIR/*/runs/<run_id>.json
+      - Load chain.yaml for that chain
+      - Determine current_step_index (None => start from 0)
+      - Execute remaining steps sequentially via MAIN server chain endpoint (or start micro-app if detached)
+      - Update run history using run_registry.record_chain_run (keep same run_id)
+    """
+    # 1) find run file
+    found = None
+    for folder in CHAINS_DIR.glob("*"):
+        run_file = folder / "runs" / f"{run_id}.json"
+        if run_file.exists():
+            found = (folder, run_file)
+            break
+    if not found:
+        print(f"❌ Run {run_id} not found")
+        sys.exit(1)
+
+    chain_dir, run_file = found
+    history = json.loads(run_file.read_text())
+
+    # don't resume cancelled or completed
+    if history.get("cancelled") or history.get("status") == "completed":
+        print("❌ Run is cancelled or already completed — not resuming")
+        return
+
+    cfg = yaml.safe_load((chain_dir / "chain.yaml").read_text())
+    agents = cfg.get("agents", [])
+    start_idx = history.get("current_step_index", -1) + 1  # next step
+    payload = history.get("input", {})
+
+    # If run was detached, resume via dedicated micro-app if possible
+    detached = history.get("detached", False)
+
+    chain_name = cfg["chain_name"]
+    chain_id = cfg["chain_id"]
+
+    # function to run a step locally (calling agent path)
+    from treehopper.treehopper import (
+        _run_agent_path as _run_agent_path_local,
+        # get_chain_id,
+    )
+
+    results = history.get("results", [])
+
+    for idx in range(start_idx, len(agents)):
+        step = agents[idx]
+        path = step.get("path")
+        inputs = step.get("inputs", [])
+        # build params using same logic as in chain_runtime_app
+        if idx == 0:
+            params = dict(payload)
+        else:
+            params = {}
+            prev = results[-1] if results else {}
+            if inputs:
+                for inp in inputs:
+                    name = inp.get("name")
+                    if name in prev:
+                        params[name] = prev[name]
+            else:
+                params = dict(prev)
+
+        # checkpoint running
+        run_registry_mod.record_chain_run(
+            chain_name=chain_name,
+            chain_id=chain_id,
+            chain_dir=chain_dir,
+            payload=payload,
+            results=results,
+            detached=detached,
+            success=False,
+            run_id=run_id,
+            status="running",
+            current_step_index=idx,
+        )
+
+        try:
+            # call agent directly (same as _run_agent_path)
+            res = asyncio.run(_run_agent_path_local(path, params))
+        except Exception as e:
+            run_registry_mod.record_chain_run(
+                chain_name=chain_name,
+                chain_id=chain_id,
+                chain_dir=chain_dir,
+                payload=payload,
+                results=results + [{"error": str(e)}],
+                detached=detached,
+                success=False,
+                run_id=run_id,
+                status="failed",
+                current_step_index=idx,
+            )
+            print(f"✗ Step {idx} failed: {e}")
+            return
+
+        results.append(res)
+
+    # final success
+    run_registry_mod.record_chain_run(
+        chain_name=chain_name,
+        chain_id=chain_id,
+        chain_dir=chain_dir,
+        payload=payload,
+        results=results,
+        detached=detached,
+        success=True,
+        run_id=run_id,
+        status="completed",
+        current_step_index=len(results) - 1 if results else None,
+    )
+    print(f"✅ Resume completed for run {run_id}")
+
+
 # -----------------------------------------------------------------------------
 # LEGACY SIMPLE CHAIN (for backward compatibility)
 # -----------------------------------------------------------------------------
@@ -715,73 +840,87 @@ def print_chain_help() -> None:
     print(
         """
 Treehopper Chain Commands
-────────────────────────────────────────────
+───────────────────────────────────────────────────────────────────────────────
   treehopper chain build <name> <agent1> <agent2> ...
-      Register a named chain using registered agents.
-      Creates ~/.treehopper/registry/chains/<id>/chain.yaml
-      and a POST endpoint /api/v1/chains/<name>.
+      Create a new chain. Installs ~/.treehopper/registry/chains/<chain_id>.
 
   treehopper chain run <name|id>
-      [--payload '{...}'] [--payload-file path]
+      [--payload '{...}'] [--payload-file file.json]
       [--detached] [--bg]
       [--parallel N] [--concurrency M]
-
-      Execute a named chain via /api/v1/chains/{name}.
-      Payload (if provided) is passed only to the FIRST agent.
+      Execute a chain sequentially.
+      First agent gets payload; later agents receive mapped fields.
 
       --detached
-            Launch a dedicated chain micro-app (FastAPI runtime).
-            Required for cancellable long-running operations.
+           Launch a dedicated chain micro-app (async, cancellable, resumable).
 
       --bg
-            Only valid with --detached. Starts the runtime in background
-            and prints log file path.
+           Run the detached micro-app in background.
 
       --parallel N
-            Execute the SAME chain N times in parallel.
-            Each run receives its own run_id.
-            Steps inside a chain remain sequential.
+           Run N independent chain executions in parallel (N run_ids).
 
       --concurrency M
-            Maximum number of chain runs executed at once (M <= parallel).
-
-      ⚠ SAFETY NOTES:
-          • Avoid mixing `--parallel` AND `--detached` unless debugging.
-          • Parallel mode = many independent chain runs.
-          • Detached mode = one dedicated micro-app runtime.
+           Max number of parallel runs at a time.
 
 Cancellation Support Matrix
-────────────────────────────────────────────
-| Execution Mode                  | Cancellable? | Reason                                      |
-|---------------------------------|--------------|---------------------------------------------|
-| chain run <name> --detached     |     YES      | Runs inside async micro-app runtime         |
-| chain run <name> --detached --bg|     YES      | Background async runtime, cooperative cancel |
-| chain run <name>                |     NO       | Main server request thread is blocking      |
-| chain run <name> --parallel N   |     NO       | Each run is a blocking HTTP request         |
-| chain run <name> --parallel N --detached | NO | All runs hit one micro-app but blocking call |
-| cancel --run <run_id>           | YES only for detached runs                  |
-| cancel-batch <batch_id>         | YES only for detached runs                  |
+───────────────────────────────────────────────────────────────────────────────
+| Execution Mode                          | Cancellable? | Reason                          |
+|-----------------------------------------|--------------|---------------------------------|
+| chain run --detached                    |     YES      | async micro-app runtime         |
+| chain run --detached --bg               |     YES      | async runtime with background   |
+| chain run (non-detached)                |     NO       | blocking HTTP request           |
+| chain run --parallel N                  |     NO       | each run is blocking            |
+| chain run --parallel N --detached       |     NO       | still blocking main-thread POST |
+| chain cancel --run <run_id>             | detached only|
+| chain cancel-batch <batch_id>           | detached only|
 
-  treehopper chain cancel <name|id> [--run <run_id> | --all]
-      Cancel active asynchronous chain executions.
+Resume Functionality (Hybrid)
+───────────────────────────────────────────────────────────────────────────────
+  treehopper chain resume <run_id>
+      Resume an interrupted chain execution.
+      • Skips completed steps (checkpointed)
+      • Re-runs only remaining steps
+      • Works with detached micro-app runs
+      • Will NOT resume completed or cancelled runs
 
-  treehopper chain cancel-batch <batch_id>
-      Cancel all runs inside a cancellable batch.
+Auto-Resume (optional)
+      Enable by setting ~/.treehopper/config.json:
+          { "auto_resume": true }
+      On main-server startup, any run with
+          status = running / pending / failed
+      is automatically resumed in background.
 
-  treehopper chain stop <name|id>
-      Stop a dedicated chain runtime if running.
-
-  treehopper chain delete <name|id>
-      Delete chain metadata and last run logs.
-
-  treehopper chain logs <name|id>
-      Show last execution summary + JSON.
-
-Legacy:
-  treehopper chain <agent_path1> <agent_path2> ...
-      Direct call to /api/v1/dev/chain with static agent paths.
+Other Commands
+───────────────────────────────────────────────────────────────────────────────
+  treehopper chain cancel --run <run_id>    Cancel a running detached chain.
+  treehopper chain cancel --batch <batch_id> Cancel all runs in batch.
+  treehopper chain cancel --all <name|id>    Cancel all active runs for a chain.
+  treehopper chain stop <name|id>            Stop detached chain runtime.
+  treehopper chain delete <name|id>          Delete chain & history.
+  treehopper chain logs <name|id>            Show last run summary.
 """
     )
+
+
+def _post_runtime_detached(url: str, payload: dict, headers: dict):
+    """
+    Fire-and-forget POST using curl so CLI never blocks waiting for runtime.
+    """
+    cmd = [
+        "curl",
+        "-s",
+        "-X",
+        "POST",
+        url,
+        "-H",
+        f"x-api-key: {headers.get('x-api-key')}",
+        "-H",
+        "Content-Type: application/json",
+        "-d",
+        json.dumps(payload),
+    ]
+    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def chain_entry(argv: List[str]) -> None:
@@ -800,6 +939,7 @@ def chain_entry(argv: List[str]) -> None:
         "help",
         "cancel",
         "cancel-batch",
+        "resume",
     }:
 
         if sub == "help":
@@ -931,7 +1071,6 @@ def chain_entry(argv: List[str]) -> None:
             return
 
         if sub == "cancel":
-
             # Unified CLI syntax:
             #   treehopper chain cancel --run <run_id>
             #   treehopper chain cancel --batch <batch_id>
@@ -943,12 +1082,34 @@ def chain_entry(argv: List[str]) -> None:
                     print("❌ Missing value for --run")
                     sys.exit(1)
                 run_id = argv[idx + 1]
-                ok = asyncio.run(cancel_run_id(run_id))
-                print(
-                    "✅ Cancel requested"
-                    if ok
-                    else "⚠️ Run not found or already finished"
+                print(f"[chains] CANCEL REQUEST for run_id={run_id}")
+                from treehopper.treehopper_cancellation import create_cancel_marker
+                from treehopper.utils.config import read_pid_and_port
+
+                # import requests
+
+                # 1 — Create FS cancel marker (source=cli, modifier includes CLI PID)
+                marker = create_cancel_marker(
+                    run_id, source="cli", modifier=f"cli:{os.getpid()}"
                 )
+                print(f"[cancel] wrote FS cancel marker → {marker}")
+
+                # 2 — Notify runtimes (best-effort)
+                chain_prefix = run_id.rsplit("-", 1)[0]  # cancel_test_chain
+                pattern = f"{CHAIN_PID_PREFIX}{chain_prefix}-*.pid"
+                for pid_file in RUNTIME_DIR.glob(pattern):
+                    pid, port = read_pid_and_port(pid_file)
+                    if port:
+                        url = f"http://127.0.0.1:{port}/api/v1/cancel/run/{run_id}"
+                        print(f"[notify] POST → {url}")
+                        try:
+                            # small timeout; we don't want CLI to block long
+                            _post_runtime_detached(
+                                url, payload={}, headers={"x-api-key": "demo-key-123"}
+                            )
+                        except Exception:
+                            pass
+                print("✅ Cancel requested (global cancel marker)")
                 return
 
             if "--batch" in argv:
@@ -973,8 +1134,10 @@ def chain_entry(argv: List[str]) -> None:
                 return
 
             print(
-                "❌ Usage:\n  treehopper chain cancel --run <run_id>\n  treehopper chain cancel --batch <batch_id>\n  \
-                    treehopper chain cancel --all <chain>"
+                "❌ Usage:\n"
+                "  treehopper chain cancel --run <run_id>\n"
+                "  treehopper chain cancel --batch <batch_id>\n"
+                "  treehopper chain cancel --all <chain>"
             )
             sys.exit(1)
 
@@ -986,6 +1149,14 @@ def chain_entry(argv: List[str]) -> None:
             batch_id = argv[1]
             n = asyncio.run(cancel_batch(batch_id))
             print(f"✅ Cancelled {n} run(s) in batch {batch_id}")
+            return
+
+        if sub == "resume":
+            if len(argv) != 2:
+                print("Usage: treehopper chain resume <run_id>")
+                sys.exit(1)
+            run_id = argv[1]
+            resume_run(run_id)
             return
 
     # fall back → legacy mode

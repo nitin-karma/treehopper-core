@@ -1,5 +1,5 @@
 from pydantic import BaseModel
 
 
-class Slow_agentRequest(BaseModel):
+class SlowAgentRequest(BaseModel):
     name: str

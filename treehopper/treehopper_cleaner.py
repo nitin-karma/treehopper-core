@@ -53,7 +53,10 @@ def main():
         print("   • chains registry")
         print("   • shared uploads")
         print("   • chroma DB memory")
+        print("   • chroma DB memory")
+        print("   • cancellation.db")
         print("   • runtime PID files")
+        print("   • runtime canceled files")
         print("🚫 subscription_id.txt will NOT be deleted")
         ans = input("Proceed? (y/N): ")
         if ans.lower() not in ("y", "yes"):

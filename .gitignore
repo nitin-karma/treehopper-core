@@ -39,3 +39,5 @@ dev_env_cleaner.sh
 testing_scripts/*.log
 examples/test_file.txt
 **/.env
+diagnostics/
+test.txt

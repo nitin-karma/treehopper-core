@@ -239,15 +239,23 @@ Treehopper supports cooperative async cancellation, similar to Temporal/Celery b
 
 > **Note:** Cancellation works ONLY in detached mode, because only detached mode provides true async task lifecycles.
 
-### 🟩 When Cancellation Works
+### Cancellation & Resume Behavior (Hybrid - manual by default)
 
-| Scenario | Supported | Reason |
-|----------|-----------|--------|
-| `chain run --detached` | ✅ YES | Async micro-app maintains cancellable tasks |
-| `chain run --detached --bg` | ✅ YES | Same as above |
-| Cancelling by run_id | ✅ YES | Tracked in ACTIVE_TASKS |
-| Cancelling all runs (`--all`) | ✅ YES | Cancels all active tasks for chain |
-| Cancelling mid-agent (sleep, network calls, LLM waits) | ✅ YES | Cooperative awaits allow interruption |
+| Command | When it works | Notes / Examples |
+|---|---|---|
+| `treehopper chain cancel --run <run_id>` | Cancels a currently running execution **if** it is registered in the cancellation registry and task is active. | Works best for runs launched by `parallel` or long-running micro-apps. |
+| `treehopper chain cancel --all <chain>` | Cancels all active runs for a chain (best-effort). | Cancels each known run_id under the chain. |
+| `treehopper chain cancel-batch <batch_id>` | Cancels all runs in a parallel batch (best-effort). | Only works if runs are still active and registered in the batch registry. |
+| `treehopper chain resume <run_id>` | Resume an unfinished/failed run (manual). | Default way to resume. Uses run history to skip completed steps. |
+| Auto-resume (opt-in) | If `auto_resume=true` in `~/.treehopper/config.json`, main server will attempt to resume eligible runs on startup. | Auto-resume spawns background resume processes and will not override runs that are `cancelled` or `completed`. |
+
+### 🟩 When cancellation actually works:
+- **Active task registered**: The run was started and `run_with_cancellation.register_task` succeeded (common for long-running async runs or parallel runs).
+- **Not yet finished**: The run is still in `ACTIVE_TASKS` registry. If task already finished, cancel reports "not found or already finished".
+- **Detached micro-app**: cancellation is effective if micro-app registered the run and is still executing.
+- **Limitations**: If the run already completed or the server crashed (task unregistered), `cancel` will not mark history as cancelled — use `resume` for recovery.
+
+
 
 ### 🟥 When Cancellation Won't Work
 
