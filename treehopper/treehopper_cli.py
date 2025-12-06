@@ -924,29 +924,29 @@ Treehopper CLI Commands
 ────────────────────────────────────────────
   Main Server/Process commands
   ============================
-  treehopper status                                Show if the main server is running
-  treehopper run                                   Start the main server
-  treehopper run --bg                              Start the main server in background
-  treehopper stop                                  Stop the main server
-  treehopper restart                               Restart main server
-  treehopper list                                  List installed agents
-  treehopper clean                                 Be Careful - To cleanup the servers, pids, agents, chain
+  [treehopper | th] status                                Show if the main server is running
+  [treehopper | th] run                                   Start the main server
+  [treehopper | th] run --bg                              Start the main server in background
+  [treehopper | th] stop                                  Stop the main server
+  [treehopper | th] restart                               Restart main server
+  [treehopper | th] list                                  List installed agents
+  [treehopper | th] clean                                 Be Careful - To cleanup the servers, pids, agents, chain
 
   Agent Related CLI Commands -
   ============================
-  treehopper push-file <agent-name> <file_path>    To push the input file to agent for any file operations
-  treehopper call <path> '<json>'                  Call an agent
-  treehopper init <agent_name>                     Create agent scaffold template
-  treehopper lint <agent_folder>                   Validate handler.py + YAML
-  treehopper build <agent_folder>                  Install agent to registry and make it available with main server
-  treehopper agent info <ref>                      Show metadata
-  treehopper agent run <name> --detached [--bg]    Start dedicated agent runtime (optionally in background)
-  treehopper agent delete <ref>                    Delete installed agent safely
+  [treehopper | th] push-file <agent-name> <file_path>    To push the input file to agent for any file operations
+  [treehopper | th] call <path> '<json>'                  Call an agent
+  [treehopper | th] init <agent_name>                     Create agent scaffold template
+  [treehopper | th] lint <agent_folder>                   Validate handler.py + YAML
+  [treehopper | th] build <agent_folder>                  Install agent to registry and run with main server
+  [treehopper | th] agent info <ref>                      Show metadata
+  [treehopper | th] agent run <name> --detached [--bg]    Start dedicated agent runtime (optionally in background)
+  [treehopper | th] agent delete <ref>                    Delete installed agent safely
 
 
   Chain Related CLI Commands
   ==========================
-  treehopper chain                                 To view all Chain related commands
+  [treehopper | th] chain                                 To view all Chain related commands
 """
     )
 

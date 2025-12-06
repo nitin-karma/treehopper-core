@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Agentic AI framework with auto-discovered agents, chaining, memory, and multi-provider LLM support."
 readme = "README.md"
 authors = [
-    { name = "Nitin Kumar", email = "developer@example.com" }
+    { name = "Nitin Kumar Karma", email = "developer@example.com" }
 ]
 license = { file = "LICENSE" }
 requires-python = ">=3.9"
@@ -32,6 +32,7 @@ Issues = "https://github.com/nitin-karma/treehopper-core/issues"
 
 [project.scripts]
 treehopper = "treehopper.treehopper_cli:main"
+th = "treehopper.treehopper_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

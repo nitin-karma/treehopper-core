@@ -16,9 +16,10 @@ setup(
     entry_points={
         "console_scripts": [
             "treehopper=treehopper.treehopper_cli:run",
+            "th=treehopper.treehopper_cli:run",
         ],
     },
-    author="Nitin",
+    author="Nitin Kumar Karma",
     description="Treehopper: A modular agentic automation framework",
     license="MIT",
 )

@@ -877,10 +877,10 @@ def print_chain_help() -> None:
         """
 Treehopper Chain Commands
 ───────────────────────────────────────────────────────────────────────────────
-  treehopper chain build <name> <agent1> <agent2> ...
+  [treehopper | th] chain build <name> <agent1> <agent2> ...
       Create a new chain. Installs ~/.treehopper/registry/chains/<chain_id>.
 
-  treehopper chain run <name|id>
+  [treehopper | th] chain run <name|id>
       [--payload '{...}'] [--payload-file file.json]
       [--detached] [--bg]
       [--parallel N] [--concurrency M]
@@ -913,7 +913,7 @@ Cancellation Support Matrix
 
 Resume Functionality (Hybrid)
 ───────────────────────────────────────────────────────────────────────────────
-  treehopper chain resume <run_id>
+  [treehopper | th] chain resume <run_id>
       Resume an interrupted chain execution.
       • Skips completed steps (checkpointed)
       • Re-runs only remaining steps
@@ -929,12 +929,12 @@ Auto-Resume (optional)
 
 Other Commands
 ───────────────────────────────────────────────────────────────────────────────
-  treehopper chain cancel --run <run_id>    Cancel a running detached chain.
-  treehopper chain cancel --batch <batch_id> Cancel all runs in batch.
-  treehopper chain cancel --all <name|id>    Cancel all active runs for a chain.
-  treehopper chain stop <name|id>            Stop detached chain runtime.
-  treehopper chain delete <name|id>          Delete chain & history.
-  treehopper chain logs <name|id>            Show last run summary.
+  [treehopper | th] chain cancel --run <run_id>    Cancel a running detached chain.
+  [treehopper | th] chain cancel --batch <batch_id> Cancel all runs in batch.
+  [treehopper | th] chain cancel --all <name|id>    Cancel all active runs for a chain.
+  [treehopper | th] chain stop <name|id>            Stop detached chain runtime.
+  [treehopper | th] chain delete <name|id>          Delete chain & history.
+  [treehopper | th] chain logs <name|id>            Show last run summary.
 """
     )
 

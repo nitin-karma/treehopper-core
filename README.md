@@ -72,10 +72,10 @@ It brings together:
 ```bash
 git clone <repo_url>
 cd treehopper-core
-pip install -r requirements.txt
+pip install -e .
 
 # Start main server
-treehopper run
+[treehopper / th] run
 ```
 
 **Open Swagger UI:**
@@ -111,7 +111,7 @@ treehopper-core/
 ### Create a new agent
 
 ```bash
-treehopper init weather
+[treehopper / th] init weather
 ```
 
 This generates:
@@ -142,8 +142,8 @@ GET /api/v1/agents/greet?name=Nitin
 ### Deploy to main server
 
 ```bash
-treehopper build weather
-treehopper run
+[treehopper / th] build weather
+[treehopper / th] run
 ```
 
 ---
@@ -194,7 +194,7 @@ Detached mode launches a full FastAPI runtime per chain, ideal for:
 ### Run chain in detached mode
 
 ```bash
-treehopper chain run my_chain --detached
+[treehopper / th] chain run my_chain --detached
 ```
 
 Starts:
@@ -206,13 +206,13 @@ http://localhost:<auto_port>/api/v1/<chain>/run
 ### Run detached in background
 
 ```bash
-treehopper chain run my_chain --detached --bg
+[treehopper / th] chain run my_chain --detached --bg
 ```
 
 ### Stop it
 
 ```bash
-treehopper chain stop my_chain
+[treehopper / th] chain stop my_chain
 ```
 
 ---
@@ -222,7 +222,7 @@ treehopper chain stop my_chain
 Run a chain N times in parallel:
 
 ```bash
-treehopper chain run my_chain --parallel 20 --concurrency 5
+[treehopper / th] chain run my_chain --parallel 20 --concurrency 5
 ```
 
 **Key points:**
@@ -243,10 +243,10 @@ Treehopper supports cooperative async cancellation, similar to Temporal/Celery b
 
 | Command | When it works | Notes / Examples |
 |---|---|---|
-| `treehopper chain cancel --run <run_id>` | Cancels a currently running execution **if** it is registered in the cancellation registry and task is active. | Works best for runs launched by `parallel` or long-running micro-apps. |
-| `treehopper chain cancel --all <chain>` | Cancels all active runs for a chain (best-effort). | Cancels each known run_id under the chain. |
-| `treehopper chain cancel-batch <batch_id>` | Cancels all runs in a parallel batch (best-effort). | Only works if runs are still active and registered in the batch registry. |
-| `treehopper chain resume <run_id>` | Resume an unfinished/failed run (manual). | Default way to resume. Uses run history to skip completed steps. |
+| `[treehopper / th] chain cancel --run <run_id>` | Cancels a currently running execution **if** it is registered in the cancellation registry and task is active. | Works best for runs launched by `parallel` or long-running micro-apps. |
+| `[treehopper / th] chain cancel --all <chain>` | Cancels all active runs for a chain (best-effort). | Cancels each known run_id under the chain. |
+| `[treehopper / th] chain cancel-batch <batch_id>` | Cancels all runs in a parallel batch (best-effort). | Only works if runs are still active and registered in the batch registry. |
+| `[treehopper / th] chain resume <run_id>` | Resume an unfinished/failed run (manual). | Default way to resume. Uses run history to skip completed steps. |
 | Auto-resume (opt-in) | If `auto_resume=true` in `~/.treehopper/config.json`, main server will attempt to resume eligible runs on startup. | Auto-resume spawns background resume processes and will not override runs that are `cancelled` or `completed`. |
 
 ### 🟩 When cancellation actually works:
@@ -271,19 +271,19 @@ Treehopper supports cooperative async cancellation, similar to Temporal/Celery b
 **Cancel by run_id:**
 
 ```bash
-treehopper chain cancel --run <run_id>
+[treehopper / th] chain cancel --run <run_id>
 ```
 
 **Cancel all active runs of a chain:**
 
 ```bash
-treehopper chain cancel --all <chain>
+[treehopper / th] chain cancel --all <chain>
 ```
 
 **Cancel an entire batch:**
 
 ```bash
-treehopper chain cancel-batch <batch_id>
+[treehopper / th] chain cancel-batch <batch_id>
 ```
 
 ---
@@ -291,7 +291,7 @@ treehopper chain cancel-batch <batch_id>
 ## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Cleaning Up
 
 ```bash
-treehopper clean
+[treehopper / th] clean
 ```
 
 This command:
@@ -308,31 +308,31 @@ This command:
 
 | Command | Description |
 |---------|-------------|
-| `treehopper run` | Start main server |
-| `treehopper run --bg` | Start in background |
-| `treehopper stop` | Stop main server |
-| `treehopper restart` | Restart |
-| `treehopper status` | Check health |
+| `[treehopper / th] run` | Start main server |
+| `[treehopper / th] run --bg` | Start in background |
+| `[treehopper / th] stop` | Stop main server |
+| `[treehopper / th] restart` | Restart |
+| `[treehopper / th] status` | Check health |
 
 ### Agents
 
 | Command | Description |
 |---------|-------------|
-| `treehopper init <agent>` | Scaffold new agent |
-| `treehopper lint <agent>` | Validate |
-| `treehopper build <agent>` | Install into registry |
-| `treehopper agent run <agent> --detached` | Start as micro-app |
+| `[treehopper / th] init <agent>` | Scaffold new agent |
+| `[treehopper / th] lint <agent>` | Validate |
+| `[treehopper / th] build <agent>` | Install into registry |
+| `[treehopper / th] agent run <agent> --detached` | Start as micro-app |
 
 ### Chains
 
 | Command | Description |
 |---------|-------------|
-| `treehopper chain build` | Create chain |
-| `treehopper chain run` | Run chain |
-| `treehopper chain stop` | Stop chain runtime |
-| `treehopper chain logs` | Show last run |
-| `treehopper chain cancel` | Cancel run(s) |
-| `treehopper chain cancel-batch` | Cancel batch |
+| `[treehopper / th] chain build` | Create chain |
+| `[treehopper / th] chain run` | Run chain |
+| `[treehopper / th] chain stop` | Stop chain runtime |
+| `[treehopper / th] chain logs` | Show last run |
+| `[treehopper / th] chain cancel` | Cancel run(s) |
+| `[treehopper / th] chain cancel-batch` | Cancel batch |
 
 ---
 
@@ -375,6 +375,6 @@ If you believe in that future — **welcome to Treehopper.**
 
 <div align="center">
 
-Made with lot of hardwork <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> by me
-
+<img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20">
+Made with lot of hardwork
 </div>
