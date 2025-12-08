@@ -908,8 +908,6 @@ Cancellation Support Matrix
 | chain run (non-detached)                |     NO       | blocking HTTP request           |
 | chain run --parallel N                  |     NO       | each run is blocking            |
 | chain run --parallel N --detached       |     NO       | still blocking main-thread POST |
-| chain cancel --run <run_id>             | detached only|
-| chain cancel-batch <batch_id>           | detached only|
 
 Resume Functionality (Hybrid)
 ───────────────────────────────────────────────────────────────────────────────
@@ -958,6 +956,100 @@ def _post_runtime_detached(url: str, payload: dict, headers: dict):
     subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def chain_sweep_resume():
+    """
+    Scan all chain run histories and resume any run that is:
+       - pending, running, or failed
+       - NOT cancelled
+       - NOT completed
+
+    Uses the existing `resume_run(run_id)` function.
+
+    This version is verbose for debugging reasons and explains why runs are skipped.
+    """
+    ensure_registry_dirs()
+
+    resumable = []  # list of (run_id, run_file_path)
+
+    for chain_dir in CHAINS_DIR.glob("*"):
+        runs_dir = chain_dir / "runs"
+        if not runs_dir.exists():
+            continue
+
+        for run_file in runs_dir.glob("*.json"):
+            try:
+                data = json.loads(run_file.read_text())
+            except Exception as e:
+                print(f"[sweep] Skipping {run_file} — invalid JSON: {e}")
+                continue
+
+            run_id = data.get("run_id")
+            status = data.get("status")
+            cancelled = data.get("cancelled", False)
+            success = data.get("success", False)
+            current_idx = data.get("current_step_index", None)
+            executed_at = data.get("executed_at", "")
+
+            if not run_id:
+                print(f"[sweep] Skipping {run_file} — no run_id")
+                continue
+
+            # Decision diagnostics
+            if cancelled:
+                print(f"[sweep] Skipping {run_id} — cancelled=True")
+                continue
+            if success:
+                print(f"[sweep] Skipping {run_id} — success=True")
+                continue
+
+            # Accept explicit statuses or implicit pending marker (current_step_index == -1)
+            if status in ("pending", "running", "failed") or current_idx == -1:
+                resumable.append((run_id, run_file, executed_at, status, current_idx))
+                print(
+                    f"[sweep] Candidate: {run_id} status={status} current_idx={current_idx}"
+                )
+            else:
+                print(
+                    f"[sweep] Skipping {run_id} — status={status} current_idx={current_idx}"
+                )
+
+    # sort by executed_at for deterministic ordering (fallback to filename if missing)
+    def _key(item):
+        _, run_file, executed_at, _, _ = item
+        if executed_at:
+            return executed_at
+        return run_file.name
+
+    resumable.sort(key=_key)
+
+    if not resumable:
+        print("✔ No resumable runs found.")
+        return
+
+    print(f"🔍 Found {len(resumable)} resumable runs:")
+    for r, _, executed_at, status, current_idx in resumable:
+        print(
+            f"   • {r}  (status={status} current_step_index={current_idx} executed_at={executed_at})"
+        )
+
+    print("\n▶ Resuming sequentially...\n")
+
+    resumed_count = 0
+    for run_id, run_file, _, _, _ in resumable:
+        print(f"⏩ resume({run_id})...")
+        try:
+            # call existing resume_run (keeps same run_id)
+            resume_run(run_id)
+            resumed_count += 1
+        except Exception as e:
+            print(f"❌ Failed to resume {run_id}: {e}")
+        print("")
+
+    print(
+        f"✅ Sweep complete — attempted resume on {resumed_count}/{len(resumable)} runs"
+    )
+
+
 def chain_entry(argv: List[str]) -> None:
     if not argv:
         print_chain_help()
@@ -975,6 +1067,7 @@ def chain_entry(argv: List[str]) -> None:
         "cancel",
         "cancel-batch",
         "resume",
+        "sweep-resume",
     }:
 
         if sub == "help":
@@ -1192,6 +1285,20 @@ def chain_entry(argv: List[str]) -> None:
                 sys.exit(1)
             run_id = argv[1]
             resume_run(run_id)
+            return
+
+        if sub == "sweep-resume":
+            """
+            treehopper chain sweep-resume
+
+            Scan ALL run files under ~/.treehopper/registry/chains/*/runs/*.json
+            Resume only runs where:
+                status in {"pending", "running", "failed"}
+                AND cancelled == False
+            Skips:
+                completed, cancelled
+            """
+            chain_sweep_resume()
             return
 
     # fall back → legacy mode

@@ -267,6 +267,147 @@ treehopper chain resume "$RUN_ID5" || true
 echo "✔ Batch cancel unaffected"
 end_timer; echo ""
 
+################################################################################
+# TEST T5 — sweep-resume should resume only valid runs
+################################################################################
+echo "TEST T5 — sweep-resume correctness" | tee -a "$LOG_FILE"
+start_timer
+
+CHAIN_NAME=$(basename "$CHAIN_DIR" | cut -d- -f1)
+BASE_RUN_FILE="$CHAIN_DIR/runs/$RUN_ID.json"
+
+timestamp_now=$(date +%s)
+
+update_run_id() {
+  FILE=$1
+  NEW_ID=$2
+  sed -i '' "s/\"run_id\": \".*\"/\"run_id\": \"$NEW_ID\"/" "$FILE"
+}
+
+##############################################
+# 1️⃣ TRUE PENDING RUN
+##############################################
+PENDING_RUN_ID="${CHAIN_NAME}-${timestamp_now}001"
+PENDING_FILE="$CHAIN_DIR/runs/$PENDING_RUN_ID.json"
+
+cp "$BASE_RUN_FILE" "$PENDING_FILE"
+
+update_run_id "$PENDING_FILE" "$PENDING_RUN_ID"
+
+sed -i '' \
+    -e 's/"status": "completed"/"status": "pending"/' \
+    -e 's/"success": true/"success": false/' \
+    -e 's/"cancelled": true/"cancelled": false/' \
+    -e 's/"current_step_index": [0-9]\+/"current_step_index": -1/' \
+    "$PENDING_FILE"
+
+# clear results
+sed -i '' 's/"results": \[[^]]*\]/"results": []/' "$PENDING_FILE"
+
+echo "   • Created pending run: $PENDING_RUN_ID"
+
+##############################################
+# 2️⃣ TRUE FAILED RUN
+##############################################
+FAILED_RUN_ID="${CHAIN_NAME}-${timestamp_now}002"
+FAILED_FILE="$CHAIN_DIR/runs/$FAILED_RUN_ID.json"
+
+cp "$BASE_RUN_FILE" "$FAILED_FILE"
+
+update_run_id "$FAILED_FILE" "$FAILED_RUN_ID"
+
+sed -i '' \
+    -e 's/"status": "completed"/"status": "failed"/' \
+    -e 's/"success": true/"success": false/' \
+    -e 's/"cancelled": true/"cancelled": false/' \
+    -e 's/"current_step_index": [0-9]\+/"current_step_index": 0/' \
+    "$FAILED_FILE"
+
+sed -i '' 's/"results": \[[^]]*\]/"results": [{"error":"synthetic-failure"}]/' "$FAILED_FILE"
+
+echo "   • Created failed run: $FAILED_RUN_ID"
+
+##############################################
+# 3️⃣ CANCELLED RUN (must NOT resume)
+##############################################
+CANCELLED_RUN_ID="${CHAIN_NAME}-${timestamp_now}003"
+CANCELLED_FILE="$CHAIN_DIR/runs/$CANCELLED_RUN_ID.json"
+
+cp "$BASE_RUN_FILE" "$CANCELLED_FILE"
+
+update_run_id "$CANCELLED_FILE" "$CANCELLED_RUN_ID"
+
+sed -i '' \
+    -e 's/"success": true/"success": false/' \
+    -e 's/"status": "completed"/"status": "cancelled"/' \
+    -e 's/"cancelled": false/"cancelled": true/' \
+    "$CANCELLED_FILE"
+
+echo "   • Created cancelled run: $CANCELLED_RUN_ID"
+
+##############################################
+# 4️⃣ COMPLETED RUN (should NOT resume)
+##############################################
+COMPLETED_RUN_ID="${CHAIN_NAME}-${timestamp_now}004"
+COMPLETED_FILE="$CHAIN_DIR/runs/$COMPLETED_RUN_ID.json"
+
+cp "$BASE_RUN_FILE" "$COMPLETED_FILE"
+update_run_id "$COMPLETED_FILE" "$COMPLETED_RUN_ID"
+
+echo "   • Created completed run: $COMPLETED_RUN_ID"
+
+##############################################
+# Run sweep-resume
+##############################################
+echo ""
+echo "▶ Running: th chain sweep-resume" | tee -a "$LOG_FILE"
+echo ""
+
+SWEEP_OUTPUT=$(th chain sweep-resume 2>&1 | tee -a "$LOG_FILE")
+echo "Sweep output: $SWEEP_OUTPUT"
+
+##############################################
+# Validate results
+##############################################
+echo ""
+echo "📌 Validating sweep results..."
+
+# 1️⃣ Pending → must be completed
+if grep -q "\"status\": \"completed\"" "$PENDING_FILE"; then
+    echo "✔ Pending run successfully resumed"
+else
+    echo "❌ Pending run NOT resumed"
+    exit 1
+fi
+
+# 2️⃣ Failed → must be completed
+if grep -q "\"status\": \"completed\"" "$FAILED_FILE"; then
+    echo "✔ Failed run successfully resumed"
+else
+    echo "❌ Failed run NOT resumed"
+    exit 1
+fi
+
+# 3️⃣ Cancelled must NOT be resumed
+if grep -q "\"status\": \"cancelled\"" "$CANCELLED_FILE"; then
+    echo "✔ Cancelled run correctly skipped"
+else
+    echo "❌ ERROR: Cancelled run was incorrectly resumed"
+    exit 1
+fi
+
+# 4️⃣ Completed must remain completed
+if grep -q "\"status\": \"completed\"" "$COMPLETED_FILE"; then
+    echo "✔ Completed run correctly skipped"
+else
+    echo "❌ Completed run modified incorrectly"
+    exit 1
+fi
+
+echo "✔ sweep-resume behavior validated"
+end_timer; echo ""
+
+
 ###############################################################################
 # STEP 12 — STOP SERVER
 ###############################################################################
