@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="treehopper",
+    name="treehopperai-core",
     version="0.1.0",
     packages=find_packages(),
     include_package_data=True,
@@ -20,6 +20,8 @@ setup(
         ],
     },
     author="Nitin Kumar Karma",
-    description="Treehopper: A modular agentic automation framework",
+    description="TreehopperAI: is a local-first, agent-centric, fully open-source \
+        automation framework for building intelligent workflows — from \
+            edge AI agents to orchestrated micro-services and distributed chains",
     license="MIT",
 )

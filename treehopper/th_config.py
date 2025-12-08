@@ -7,7 +7,9 @@ HOME = Path.home()
 
 # Allow runtime environment overrides (critical for cancellation correctness)
 # TH_ROOT = Path(os.getenv("TREEHOPPER_TH_ROOT", str(HOME / ".treehopper")))
-TH_ROOT = Path.home() / ".treehopper"
+# Pick up env vars if set, otherwise default
+TH_ROOT = Path(os.getenv("TH_ROOT", str(HOME / ".treehopper")))
+# TH_ROOT = Path.home() / ".treehopper"
 # Registry layout
 REGISTRY_DIR = TH_ROOT / "registry"
 REGISTRY_AGENTS = REGISTRY_DIR / "agents"
@@ -16,7 +18,8 @@ CHAINS_DIR = REGISTRY_DIR / "chains"
 CHAINS_INDEX = REGISTRY_DIR / "chains.json"
 
 # Runtime layout — ALSO override-able
-RUNTIME_DIR = TH_ROOT / "runtime"
+# RUNTIME_DIR = TH_ROOT / "runtime"
+RUNTIME_DIR = Path(os.getenv("RUNTIME_DIR", str(TH_ROOT / "runtime")))
 CANCEL_DIR = RUNTIME_DIR / "cancels"
 CANCEL_DIR.mkdir(parents=True, exist_ok=True)
 MAIN_PID_FILE = RUNTIME_DIR / "main_server.pid"
@@ -44,3 +47,12 @@ for _d in (TH_ROOT, REGISTRY_DIR, REGISTRY_AGENTS, CHAINS_DIR, RUNTIME_DIR, CANC
         _d.mkdir(parents=True, exist_ok=True)
     except Exception:
         pass
+
+
+# -------------------------------------------------------------------
+# Log Constants
+# -------------------------------------------------------------------
+
+DEFAULT_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+DEFAULT_BACKUP_COUNT = 10  # Keep last 10 files
+DEFAULT_LOG_NAME = "treehopper"

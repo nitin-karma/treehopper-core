@@ -46,6 +46,10 @@ import socket
 
 import signal
 
+from treehopper.logging import get_logger
+
+logger = get_logger()
+logger.info("Inside CLI")
 load_dotenv()
 
 
@@ -75,7 +79,8 @@ def maybe_inject_dev_pythonpath(env: dict):
         from treehopper.environment import inject_pythonpath
 
         inject_pythonpath(env)
-    except Exception:
+    except Exception as e:
+        logger.error(f"{str(e)}")
         pass
 
     return env
@@ -118,7 +123,8 @@ def read_pid(path: Path) -> int | None:
             pid_str, _ = text.split(":", 1)
             return int(pid_str)
         return int(text)
-    except Exception:
+    except Exception as e:
+        logger.error(f"{str(e)}")
         return None
 
 
@@ -137,19 +143,22 @@ def read_pid_and_port(path: Path) -> tuple[int | None, int | None]:
             pid_str, port_str = text.split(":", 1)
             return int(pid_str), int(port_str)
         return int(text), None
-    except Exception:
+    except Exception as e:
+        logger.error(f"{str(e)}")
         return None, None
 
 
 def kill_pid(pid: int):
     try:
         os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
+    except ProcessLookupError as e:
+        logger.error(f"{str(e)}")
         return True
     time.sleep(3)
     try:
         os.kill(pid, signal.SIGKILL)
-    except ProcessLookupError:
+    except ProcessLookupError as e:
+        logger.error(f"{str(e)}")
         return True
     return True
 
@@ -177,7 +186,8 @@ def load_agents_index() -> list[dict]:
         return []
     try:
         return json.loads(REGISTRY_AGENTS_INDEX.read_text())
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        logger.error(f"{str(e)}")
         return []
 
 
@@ -219,7 +229,7 @@ def run(
     LOG_FILE.write_text("")
 
     if background:
-        print(f"🚀 Starting Treehopper in background on port {th_port}")
+        logger.info(f"🚀 Starting Treehopper in background on port {th_port}")
         env = os.environ.copy()
         env["PROD"] = "1"
         # Inject PYTHONPATH only in dev mode
@@ -245,6 +255,9 @@ def run(
         print(f"sys-executable path - {sys.executable}")
         print(f"📌 PID: {proc.pid}")
         print(f"📝 Logs: {LOG_FILE}")
+        logger.info(f"sys-executable path - {sys.executable}")
+        logger.info(f"📌 PID: {proc.pid}")
+        logger.info(f"📝 Logs: {LOG_FILE}")
         return
 
     # foreground mode
@@ -258,7 +271,7 @@ def run(
 
 
 def restart(th_port: int = 1567) -> None:
-    print("🔄 Restarting Treehopper server...")
+    logger.info("🔄 Restarting Treehopper server...")
 
     # 1️⃣ Kill running uvicorn + treehopper servers
     subprocess.run(["pkill", "-f", "uvicorn"], stderr=subprocess.DEVNULL)
@@ -293,11 +306,16 @@ def restart(th_port: int = 1567) -> None:
                 f"http://localhost:{th_port}/api/v1/sys/health", timeout=0.25
             )
             if r.status_code == 200:
+                logger.info("🚀 Treehopper restarted")
                 print("🚀 Treehopper restarted")
                 return
-        except Exception:
+        except Exception as e:
+            logger.error(f"[treehopper_cli] {str(e)}")
             pass
 
+    logger.info(
+        "⚠️ Restart attempted, but health did not confirm — server may still be starting."
+    )
     print(
         "⚠️ Restart attempted, but health did not confirm — server may still be starting."
     )
@@ -307,6 +325,7 @@ def status():
     pid = read_pid(MAIN_PID_FILE)
     if not pid:
         print("⛔ Treehopper is NOT running")
+        logger.info("⛔ Treehopper is NOT running")
         return
 
     # confirm process exists
@@ -314,8 +333,10 @@ def status():
         os.kill(pid, 0)  # does nothing if process exists
         print(f"🟢 Treehopper server is RUNNING (PID {pid})")
         print("URL: http://localhost:1567")
+        logger.info(f"🟢 Treehopper server is RUNNING (PID {pid})")
+        logger.info("URL: http://localhost:1567")
     except ProcessLookupError:
-        print("⚠️ PID file exists but process is not running — cleaning...")
+        logger.error("⚠️ PID file exists but process is not running — cleaning...")
         MAIN_PID_FILE.unlink(missing_ok=True)
 
 
@@ -326,10 +347,12 @@ def ensure_server() -> None:
             == 200
         ):
             return
-    except Exception:
+    except Exception as e:
+        logger.error(f"[treehopper_cli] {str(e)}")
         pass
 
-    print("⚠️  API server not running — starting FastAPI now...")
+    logger.info("⚠️  API server not running — starting FastAPI now...")
+    print(("⚠️  API server not running — starting FastAPI now..."))
     subprocess.Popen(["treehopper", "run"])
 
     for _ in range(15):
@@ -340,9 +363,11 @@ def ensure_server() -> None:
                 == 200
             ):
                 return
-        except Exception:
+        except Exception as e:
+            logger.error(f"{str(e)}")
             continue
 
+    logger.info("ℹ️  API may already be running — continuing")
     print("ℹ️  API may already be running — continuing")
 
 
@@ -354,6 +379,7 @@ def call(path: str, params: dict) -> None:
 
     method = next((a["method"] for a in agents if a["path"] == path), None)
     if not method:
+        logger.info(f"❌ Agent not found: {path}")
         print(f"❌ Agent not found: {path}")
         return
 
@@ -362,6 +388,7 @@ def call(path: str, params: dict) -> None:
     else:
         response = requests.post(f"{BASE_URL}{path}", json=params, headers=API_KEY)
 
+    logger.info(response.text)
     print(response.text)
 
 
@@ -374,6 +401,9 @@ def list_agents() -> None:
         [agent["path"], agent["goal"], ", ".join(agent.get("tags", []))]
         for agent in agents
     ]
+    logger.info(
+        tabulate(table_data, headers=["AGENT PATH", "GOAL", "TAGS"], tablefmt="grid")
+    )
     print(tabulate(table_data, headers=["AGENT PATH", "GOAL", "TAGS"], tablefmt="grid"))
 
 
@@ -414,12 +444,12 @@ def init_agent(agent_name: str) -> None:
     agent_name = validate_agent_name(agent_name)
 
     if agent_name_exists(agent_name):
-        print(f"❌ Agent '{agent_name}' already exists")
+        logger.info(f"❌ Agent '{agent_name}' already exists")
         sys.exit(1)
 
     target_dir = Path.cwd() / agent_name
     if target_dir.exists():
-        print(f"❌ Directory '{agent_name}' already exists here.")
+        logger.info(f"❌ Directory '{agent_name}' already exists here.")
         sys.exit(1)
 
     ensure_registry_dirs()
@@ -488,6 +518,9 @@ async def handle(payload: {agent_name.capitalize()}Request = Body(...)):
     print(f"✨ Scaffold created at {target_dir}")
     print(f"🆔 agent_id: {agent_id}")
     print(f"🔑 subscription_id: {subscription_id}")
+    logger.info(f"✨ Scaffold created at {target_dir}")
+    logger.info(f"🆔 agent_id: {agent_id}")
+    logger.info(f"🔑 subscription_id: {subscription_id}")
 
 
 # ---------------------------------------------------------------------
@@ -517,6 +550,7 @@ def lint_agent(agent_ref: str) -> None:
     handler_path = agent_dir / "handler.py"
     if not handler_path.exists():
         print("❌ handler.py missing")
+        logger.warn("❌ handler.py missing")
         sys.exit(1)
 
     tree = ast.parse(handler_path.read_text())
@@ -537,6 +571,10 @@ def lint_agent(agent_ref: str) -> None:
 
             # 1. Check for unexpected parameters
             if not set(param_names).issubset(valid_params):
+                logger.warn(
+                    f"❌ Handler signature contains invalid parameters: \
+                        {set(param_names) - valid_params}. Only 'file' and 'payload' are allowed."
+                )
                 print(
                     f"❌ Handler signature contains invalid parameters: \
                         {set(param_names) - valid_params}. Only 'file' and 'payload' are allowed."
@@ -545,6 +583,9 @@ def lint_agent(agent_ref: str) -> None:
 
             # 2. Check for empty signature (must have at least one)
             if not param_names:
+                logger.warn(
+                    "❌ Handler must accept at least one argument: 'file' or 'payload'."
+                )
                 print(
                     "❌ Handler must accept at least one argument: 'file' or 'payload'."
                 )
@@ -557,6 +598,9 @@ def lint_agent(agent_ref: str) -> None:
                 file_param = next((p for p in params if p.arg == "file"), None)
                 # We need to ensure it has some type annotation (e.g., UploadFile = File(...))
                 if not file_param or not file_param.annotation:
+                    logger.info(
+                        "❌ The 'file' parameter must be present and typed (e.g., file: UploadFile = File(None))."
+                    )
                     print(
                         "❌ The 'file' parameter must be present and typed (e.g., file: UploadFile = File(None))."
                     )
@@ -567,6 +611,10 @@ def lint_agent(agent_ref: str) -> None:
                 payload_param = next((p for p in params if p.arg == "payload"), None)
                 # We need to ensure it has some type annotation (e.g., payload: Schema = Form(...))
                 if not payload_param or not payload_param.annotation:
+                    logger.info(
+                        "❌ The 'payload' parameter must be present and typed with\
+                             a Schema and Form/Body (e.g., payload: Schema = Form())."
+                    )
                     print(
                         "❌ The 'payload' parameter must be present and typed with\
                              a Schema and Form/Body (e.g., payload: Schema = Form())."
@@ -576,6 +624,9 @@ def lint_agent(agent_ref: str) -> None:
             # Additional Check: If 'file' is absent, 'payload' must be present for a functional API
             if "file" not in param_names and "payload" not in param_names:
                 # This should be caught by the empty signature check, but redundant for safety
+                logger.info(
+                    "❌ Handler must accept at least one argument: 'file' or 'payload'."
+                )
                 print(
                     "❌ Handler must accept at least one argument: 'file' or 'payload'."
                 )
@@ -585,15 +636,17 @@ def lint_agent(agent_ref: str) -> None:
             break
 
     if not found:
+        logger.info("❌ No handle() function found")
         print("❌ No handle() function found")
         sys.exit(1)
-
+    logger.info(f"🟢 Lint passed for {agent_ref}")
     print(f"🟢 Lint passed for {agent_ref}")
 
 
 def build_agent(agent_ref: str) -> None:
     agent_dir = Path.cwd() / agent_ref
     if not agent_dir.exists() or not agent_dir.is_dir():
+        logger.info(f"❌ Agent folder '{agent_ref}' does not exist")
         print(f"❌ Agent folder '{agent_ref}' does not exist")
         sys.exit(1)
 
@@ -607,6 +660,7 @@ def build_agent(agent_ref: str) -> None:
     inputs = cfg.get("inputs")
     outputs = cfg.get("outputs")
     if not isinstance(inputs, list) or not isinstance(outputs, list):
+        logger.info("❌ agent.yaml must include 'inputs' and 'outputs' list fields")
         print("❌ agent.yaml must include 'inputs' and 'outputs' list fields")
         sys.exit(1)
 
@@ -616,6 +670,7 @@ def build_agent(agent_ref: str) -> None:
     # 🚫 Prevent duplicate agent names
     for agent in index:
         if agent["agent_name"] == agent_name and agent["agent_id"] != agent_id:
+            logger.info(f"❌ Agent name '{agent_name}' already exists")
             print(f"❌ Agent name '{agent_name}' already exists")
             sys.exit(1)
 
@@ -642,9 +697,14 @@ def build_agent(agent_ref: str) -> None:
     )
     save_agents_index(index)
 
+    logger.info(f"✅ Built agent '{agent_name}' → {target_dir}")
+    logger.info("📌 Call example:")
     print(f"✅ Built agent '{agent_name}' → {target_dir}")
     print("📌 Call example:")
     ex_key = inputs[0]["name"]
+    logger.info(
+        f'  treehopper call /api/v1/agents/{agent_name} \'{{"{ex_key}": "sample"}}\''
+    )
     print(f'  treehopper call /api/v1/agents/{agent_name} \'{{"{ex_key}": "sample"}}\'')
 
 
@@ -656,6 +716,7 @@ def push_file(agent_name: str, src_path: str) -> None:
     match = next((a for a in index if a["agent_name"] == agent_name), None)
     if not match:
         print(f"❌ No agent found named '{agent_name}'. Did you build it first?")
+        logger.info(f"❌ No agent found named '{agent_name}'. Did you build it first?")
         sys.exit(1)
 
     agent_id = match["agent_id"]
@@ -664,6 +725,7 @@ def push_file(agent_name: str, src_path: str) -> None:
 
     src = Path(src_path)
     if not src.exists() or not src.is_file():
+        logger.info(f"❌ File not found: {src_path}")
         print(f"❌ File not found: {src_path}")
         sys.exit(1)
 
@@ -678,6 +740,11 @@ def push_file(agent_name: str, src_path: str) -> None:
     print(f'    {{"file_path": "{relative_path}"}}')
     print("💡 This survives agent rebuilds.")
 
+    logger.info(f"📁 File stored persistently → {dst}")
+    logger.info("🔑 Use in payload:")
+    logger.info(f'    {{"file_path": "{relative_path}"}}')
+    logger.info("💡 This survives agent rebuilds.")
+
 
 # ---------------------------------------------------------------------
 # AGENT INFO
@@ -690,9 +757,12 @@ def agent_info(ref: str) -> None:
     )
     if not match:
         print(f"❌ No agent found matching '{ref}'")
+        logger.info(f"❌ No agent found matching '{ref}'")
         sys.exit(1)
 
     yaml_path = REGISTRY_AGENTS / match["agent_id"] / "agent.yaml"
+    logger.info("📄 Agent metadata:\n")
+    logger.info(yaml.safe_dump(yaml.safe_load(yaml_path.read_text()), sort_keys=False))
     print("📄 Agent metadata:\n")
     print(yaml.safe_dump(yaml.safe_load(yaml_path.read_text()), sort_keys=False))
 
@@ -706,6 +776,7 @@ def delete_agent(ref: str):
         (a for a in index if a["agent_name"] == ref or a["agent_id"] == ref), None
     )
     if not match:
+        logger.info(f"❌ No agent found matching '{ref}'")
         print(f"❌ No agent found matching '{ref}'")
         sys.exit(1)
 
@@ -715,6 +786,7 @@ def delete_agent(ref: str):
 
     confirm = input(f"⚠️ Delete agent '{agent_name}' (ID {agent_id}) permanently? y/N: ")
     if confirm.lower() not in ("y", "yes"):
+        logger.info("❎ Cancelled")
         print("❎ Cancelled")
         return
 
@@ -725,6 +797,9 @@ def delete_agent(ref: str):
     # remove from index
     index = [a for a in index if a["agent_id"] != agent_id]
     save_agents_index(index)
+
+    logger.info(f"🗑 Deleted agent '{agent_name}' ({agent_id})")
+    logger.info("🔄 Restarting server to refresh agent registry...")
 
     print(f"🗑 Deleted agent '{agent_name}' ({agent_id})")
     print("🔄 Restarting server to refresh agent registry...")
@@ -738,11 +813,14 @@ def delete_agent(ref: str):
 def stop():
     pid = read_pid(MAIN_PID_FILE)
     if not pid:
+        logger.info("ℹ️ No running Treehopper server found")
         print("ℹ️ No running Treehopper server found")
         return
+    logger.info(f"🛑 Stopping Treehopper server (PID {pid}) ...")
     print(f"🛑 Stopping Treehopper server (PID {pid}) ...")
     kill_pid(pid)
     MAIN_PID_FILE.unlink(missing_ok=True)
+    logger.info("✔ Stopped")
     print("✔ Stopped")
 
 
@@ -755,11 +833,13 @@ def stop_chain():
     for f in RUNTIME_DIR.iterdir():
         if f.name.startswith(CHAIN_PID_PREFIX) and f.suffix == ".pid":
             pid = read_pid(f)
+            logger.info(f"🛑 Stopping chain runtime {f.name} (PID {pid})")
             print(f"🛑 Stopping chain runtime {f.name} (PID {pid})")
             kill_pid(pid)
             f.unlink(missing_ok=True)
             stopped = True
     if not stopped:
+        logger.info("ℹ️ No chain runtimes found")
         print("ℹ️ No chain runtimes found")
 
 
@@ -774,6 +854,7 @@ def run_chain_from_cli(args: list[str]):
       treehopper chain /api/v1/agents/A /api/v1/agents/B ...
     """
     if len(args) < 1:
+        logger.info("Usage: treehopper chain <agent1> <agent2> ...")
         print("Usage: treehopper chain <agent1> <agent2> ...")
         sys.exit(1)
 
@@ -782,6 +863,7 @@ def run_chain_from_cli(args: list[str]):
 
     ensure_server()
     r = requests.post(f"{BASE_URL}/api/v1/dev/chain", json=chain_body, headers=API_KEY)
+    logger.info(r.text)
     print(r.text)
 
 
@@ -811,6 +893,7 @@ def resolve_agent_meta(agent_name_or_id: str) -> dict:
     for a in index:
         if a["agent_name"] == agent_name_or_id or a["agent_id"] == agent_name_or_id:
             return a
+    logger.info(f"❌ Agent not found: {agent_name_or_id}")
     print(f"❌ Agent not found: {agent_name_or_id}")
     sys.exit(1)
 
@@ -833,6 +916,7 @@ def agent_run_detached(
 
     # If explicit port requested and already in use -> strict error
     if port_override is not None and is_port_in_use(port):
+        logger.info(f"❌ Port {port} is already in use. Choose a different port.")
         print(f"❌ Port {port} is already in use. Choose a different port.")
         sys.exit(1)
 
@@ -843,6 +927,17 @@ def agent_run_detached(
             os.kill(existing_pid, 0)  # check process still exists
             # If port was written earlier, use it; otherwise use derived port
             use_port = existing_port or port
+            logger.info(
+                f"ℹ️ Agent runtime already running for '{meta['agent_name']}' "
+                f"(PID {existing_pid}) on http://localhost:{use_port}"
+            )
+            logger.info(
+                f"📌 POST   http://localhost:{use_port}/api/v1/{meta['agent_name']}/run"
+            )
+            logger.info(
+                f"🔍 Health http://localhost:{use_port}/api/v1/{meta['agent_name']}/health"
+            )
+
             print(
                 f"ℹ️ Agent runtime already running for '{meta['agent_name']}' "
                 f"(PID {existing_pid}) on http://localhost:{use_port}"
@@ -861,6 +956,9 @@ def agent_run_detached(
 
     # Start runtime
     print(
+        f"🚀 Starting detached agent runtime for '{meta['agent_name']}' on http://localhost:{port}"
+    )
+    logger.info(
         f"🚀 Starting detached agent runtime for '{meta['agent_name']}' on http://localhost:{port}"
     )
     env = os.environ.copy()
@@ -886,6 +984,10 @@ def agent_run_detached(
     # persist pid + port so future starts can report correct port
     write_pid(pid_file, proc.pid, port)
 
+    logger.info(f"📝 Agent runtime logs → {LOG_FILE}")
+    logger.info(f"📌 POST   http://localhost:{port}/api/v1/{meta['agent_name']}/run")
+    logger.info(f"🔍 Health http://localhost:{port}/api/v1/{meta['agent_name']}/health")
+
     print(f"📝 Agent runtime logs → {LOG_FILE}")
     print(f"📌 POST   http://localhost:{port}/api/v1/{meta['agent_name']}/run")
     print(f"🔍 Health http://localhost:{port}/api/v1/{meta['agent_name']}/health")
@@ -903,12 +1005,15 @@ def agent_stop(ref: str) -> None:
     pid = read_pid(pid_file)
 
     if not pid:
+        logger.info(f"ℹ️ No detached runtime for agent '{meta['agent_name']}'")
         print(f"ℹ️ No detached runtime for agent '{meta['agent_name']}'")
         return
 
+    logger.info(f"🛑 Stopping agent runtime '{meta['agent_name']}' (PID {pid})")
     print(f"🛑 Stopping agent runtime '{meta['agent_name']}' (PID {pid})")
     kill_pid(pid)
     pid_file.unlink(missing_ok=True)
+    logger.info("✔ Stopped")
     print("✔ Stopped")
 
 
@@ -918,6 +1023,38 @@ def agent_stop(ref: str) -> None:
 
 
 def print_help():
+    logger.info(
+        """
+Treehopper CLI Commands
+────────────────────────────────────────────
+  Main Server/Process commands
+  ============================
+  [treehopper | th] status                                Show if the main server is running
+  [treehopper | th] run                                   Start the main server
+  [treehopper | th] run --bg                              Start the main server in background
+  [treehopper | th] stop                                  Stop the main server
+  [treehopper | th] restart                               Restart main server
+  [treehopper | th] list                                  List installed agents
+  [treehopper | th] clean                                 Be Careful - To cleanup the servers, pids, agents, chain
+
+  Agent Related CLI Commands -
+  ============================
+  [treehopper | th] push-file <agent-name> <file_path>    To push the input file to agent for any file operations
+  [treehopper | th] call <path> '<json>'                  Call an agent
+  [treehopper | th] init <agent_name>                     Create agent scaffold template
+  [treehopper | th] lint <agent_folder>                   Validate handler.py + YAML
+  [treehopper | th] build <agent_folder>                  Install agent to registry and run with main server
+  [treehopper | th] agent info <ref>                      Show metadata
+  [treehopper | th] agent run <name> --detached [--bg]    Start dedicated agent runtime (optionally in background)
+  [treehopper | th] agent delete <ref>                    Delete installed agent safely
+
+
+  Chain Related CLI Commands
+  ==========================
+  [treehopper | th] chain                                 To view all Chain related commands
+"""
+    )
+
     print(
         """
 Treehopper CLI Commands
@@ -955,6 +1092,7 @@ Treehopper CLI Commands
 # MAIN
 # ---------------------------------------------------------------------
 def main() -> None:
+    logger.info("Starting treehopper")
     if len(sys.argv) < 2:
         print_help()
         sys.exit(1)
@@ -962,39 +1100,53 @@ def main() -> None:
     cmd = sys.argv[1]
 
     if cmd == "help":
+        logger.info("help command")
         print_help()
     elif cmd == "run":
+        logger.info("run command")
         bg = "--bg" in sys.argv
         run(background=bg)
     elif cmd == "stop":
+        logger.info("stop command")
         stop()
     elif cmd == "restart":
+        logger.info("restart command")
         restart()
     elif cmd == "list":
+        logger.info("list command")
         list_agents()
     elif cmd == "call":
+        logger.info("call command")
         call(sys.argv[2], json.loads(sys.argv[3]))
     elif cmd == "init":
+        logger.info("initialising command")
         if len(sys.argv) != 3:
             print("❌ Usage: treehopper init <agent_name>")
             sys.exit(1)
         agent_name = validate_agent_name(sys.argv[2])
         init_agent(agent_name)
     elif cmd == "lint":
+        logger.info("lint command")
         lint_agent(sys.argv[2])
     elif cmd == "build":
+        logger.info("build command")
         build_agent(sys.argv[2])
     elif cmd == "chain" and len(sys.argv) > 2 and sys.argv[2] == "stop":
+        logger.info("chain with stop command")
         stop_chain()
     elif cmd == "chain":
+        logger.info("chain command")
         from .treehopper_chains import chain_entry
 
         chain_entry(sys.argv[2:])
     elif cmd == "status":
+        logger.info("status command")
         status()
     elif cmd == "agent":
+        logger.info("agent command")
         sub = sys.argv[2]
         if sub == "run" and "--detached" in sys.argv:
+            logger.info("agent run detatched command")
             if len(sys.argv) < 4:
                 print(
                     "Usage: treehopper agent run <name> --detached "
@@ -1006,13 +1158,16 @@ def main() -> None:
             port_override: int | None = None
 
             if "--port" in sys.argv:
+                logger.info("agent port command")
                 idx = sys.argv.index("--port")
                 if idx + 1 >= len(sys.argv):
                     print("❌ Missing value for --port")
+                    logger.info("❌ Missing value for --port")
                     sys.exit(1)
                 try:
                     port_override = int(sys.argv[idx + 1])
                 except ValueError:
+                    logger.error("❌ Invalid value for --port (must be integer)")
                     print("❌ Invalid value for --port (must be integer)")
                     sys.exit(1)
 
@@ -1020,18 +1175,21 @@ def main() -> None:
             agent_run_detached(ref, port_override)
 
         elif sub == "stop":
+            logger.info("agent stop command")
             if len(sys.argv) < 4:
                 print("Usage: treehopper agent stop <name|id>")
                 sys.exit(1)
             agent_stop(sys.argv[3])
 
         elif sub == "info":
+            logger.info("agent info command")
             if len(sys.argv) < 4:
                 print("Usage: treehopper agent info <ref>")
                 sys.exit(1)
             agent_info(sys.argv[3])
 
         elif sub == "delete":
+            logger.info("agent delete command")
             if len(sys.argv) < 4:
                 print("Usage: treehopper agent delete <ref>")
                 sys.exit(1)
@@ -1039,19 +1197,23 @@ def main() -> None:
 
         else:
             print(f"Unknown agent subcommand: {sub}")
+            logger.info(f"Unknown agent subcommand: {sub}")
             print_help()
             sys.exit(1)
 
     elif cmd == "push-file":
         if len(sys.argv) != 4:
+            logger.info("Usage: treehopper push-file <agent_name> <path>")
             print("Usage: treehopper push-file <agent_name> <path>")
             sys.exit(1)
         push_file(sys.argv[2], sys.argv[3])
     elif cmd == "clean":
+        logger.info("agent clean command")
         from .treehopper_cleaner import main as clean_main
 
         clean_main()
     else:
+        logger.info(f"Unknown command: {cmd}")
         print(f"Unknown command: {cmd}")
         print_help()
         sys.exit(1)

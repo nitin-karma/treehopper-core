@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "treehopper"
+name = "treehopperai-core"
 version = "0.1.0"
-description = "Agentic AI framework with auto-discovered agents, chaining, memory, and multi-provider LLM support."
+description = "TreehopperAI: is a local-first, agent-centric, fully open-source automation framework for building intelligent workflows — from edge AI agents to orchestrated micro-services and distributed chains"
 readme = "README.md"
 authors = [
     { name = "Nitin Kumar Karma", email = "developer@example.com" }
@@ -24,6 +24,16 @@ dependencies = [
     "google-generativeai>=0.4",
     "tiktoken>=0.6",
     "chromadb>=0.4,<0.6",
+]
+
+# -------------------------------------------------------
+# ✅ NEW — Python test/development dependencies
+# -------------------------------------------------------
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.23",
+    "pytest-mock>=3.12",
 ]
 
 [project.urls]
@@ -49,11 +59,23 @@ treehopper = [
     "templates/*",
 ]
 
+# -------------------------------------------------------
+# ✅ UPDATED Pytest configuration (compatible with new tests)
+# -------------------------------------------------------
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-vv --disable-warnings --maxfail=1"
 asyncio_mode = "auto"
-env = ["TH_TEST_MODE=1", "PYTEST_CURRENT_TEST=1"]
+env = [
+    "TH_TEST_MODE=1",
+    "PYTEST_CURRENT_TEST=1"
+]
+markers = [
+    "unit: unit tests",
+    "integration: integration tests",
+    "e2e: end-to-end tests"
+]
 
 [mypy]
 ignore_missing_imports = true

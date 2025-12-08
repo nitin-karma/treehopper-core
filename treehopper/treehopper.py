@@ -46,7 +46,10 @@ from treehopper.th_config import (
     CHAINS_INDEX,
     VERSION,
 )
+from treehopper.logging import get_logger
 
+logger = get_logger()
+logger.info("Inside Main Server")
 load_dotenv()
 
 # -------------------------------------------------------
@@ -314,7 +317,7 @@ async def list_agents():
 
 @router_dev.get("/chains")
 async def list_chains():
-    print("[MAIN RUN TIME] to list the chain")
+    logger.info("[MAIN RUN TIME] to list the chain")
     results: list[dict] = []
     if CHAINS_DIR.is_dir():
         for folder in CHAINS_DIR.iterdir():
@@ -621,7 +624,9 @@ def discover_agents():
     if os.getenv("PYTEST_CURRENT_TEST"):
         cli_commands = {"run", "call", "build", "lint", "init"}
         if not any(cmd in sys.argv for cmd in cli_commands):
-            print("🧪 Pytest in-memory mode: skipping folder agent auto-discovery")
+            logger.info(
+                "🧪 Pytest in-memory mode: skipping folder agent auto-discovery"
+            )
             return
 
     core_dir = os.path.join(os.path.dirname(__file__), "agents")
