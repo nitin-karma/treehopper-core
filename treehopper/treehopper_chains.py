@@ -918,12 +918,13 @@ Resume Functionality (Hybrid)
       • Works with detached micro-app runs
       • Will NOT resume completed or cancelled runs
 
-Auto-Resume (optional)
-      Enable by setting ~/.treehopper/config.json:
-          { "auto_resume": true }
-      On main-server startup, any run with
-          status = running / pending / failed
-      is automatically resumed in background.
+[treehopper | th] chain sweep-resume
+            • Scan ALL run files under ~/.treehopper/registry/chains/*/runs/*.json
+            • Resume only runs where:
+                status in {"pending", "running", "failed"}
+                AND cancelled == False
+            • Skips:
+                completed, cancelled
 
 Other Commands
 ───────────────────────────────────────────────────────────────────────────────
