@@ -1,5 +1,6 @@
 import os
 import sys
+import argparse
 from pathlib import Path
 from treehopper.th_config import (
     API_KEY,
@@ -337,6 +338,7 @@ def status():
         logger.info("URL: http://localhost:1567")
     except ProcessLookupError:
         logger.error("⚠️ PID file exists but process is not running — cleaning...")
+        print("⚠️ PID file exists but process is not running — cleaning...")
         MAIN_PID_FILE.unlink(missing_ok=True)
 
 
@@ -1040,7 +1042,7 @@ Treehopper CLI Commands
   Agent Related CLI Commands -
   ============================
   [treehopper | th] push-file <agent-name> <file_path>    To push the input file to agent for any file operations
-  [treehopper | th] call <path> '<json>'                  Call an agent
+  [treehopper | th] call <path> '<json>' | --payload-file  Call an agent using the json payload or a json file
   [treehopper | th] init <agent_name>                     Create agent scaffold template
   [treehopper | th] lint <agent_folder>                   Validate handler.py + YAML
   [treehopper | th] build <agent_folder>                  Install agent to registry and run with main server
@@ -1072,7 +1074,7 @@ Treehopper CLI Commands
   Agent Related CLI Commands -
   ============================
   [treehopper | th] push-file <agent-name> <file_path>    To push the input file to agent for any file operations
-  [treehopper | th] call <path> '<json>'                  Call an agent
+  [treehopper | th] call <path> '<json>'| --payload-file  Call an agent using the escaped json payload or a json file
   [treehopper | th] init <agent_name>                     Create agent scaffold template
   [treehopper | th] lint <agent_folder>                   Validate handler.py + YAML
   [treehopper | th] build <agent_folder>                  Install agent to registry and run with main server
@@ -1097,7 +1099,7 @@ def main() -> None:
         print_help()
         sys.exit(1)
 
-    cmd = sys.argv[1]
+    cmd = sys.argv[1].lower()
 
     if cmd == "help":
         logger.info("help command")
@@ -1117,7 +1119,59 @@ def main() -> None:
         list_agents()
     elif cmd == "call":
         logger.info("call command")
-        call(sys.argv[2], json.loads(sys.argv[3]))
+        parser = argparse.ArgumentParser(
+            description="Call an agent endpoint.", add_help=False
+        )
+        # We need to know where the path is and where the data is
+        parser.add_argument(
+            "path", help="The API endpoint path, e.g., /api/v1/agents/my_agent"
+        )
+        # Optional file argument
+        parser.add_argument(
+            "--payload-file", help="Path to a JSON file containing the request payload."
+        )
+        # Optional inline JSON argument (old way)
+        parser.add_argument(
+            "json_payload", nargs="?", default=None, help="Inline JSON payload string."
+        )
+
+        # Parse arguments starting from sys.argv[2]
+        try:
+            args = parser.parse_args(sys.argv[2:])
+        except SystemExit:
+            # Handle case where only 'th call' is given or help is requested
+            return
+
+        json_data = None
+
+        if args.payload_file:
+            # Case 1: Load from file
+            if not os.path.exists(args.payload_file):
+                print(f"❌ Error: Payload file not found at {args.payload_file}")
+                return
+            with open(args.payload_file, "r") as f:
+                try:
+                    json_data = json.load(f)
+                except json.JSONDecodeError:
+                    print(f"❌ Error: Invalid JSON format in file {args.payload_file}")
+                    return
+
+        elif args.json_payload:
+            # Case 2: Load from inline string (original way)
+            try:
+                json_data = json.loads(args.json_payload)
+            except json.JSONDecodeError:
+                print("❌ Error: Invalid JSON string provided.")
+                return
+
+        else:
+            print(
+                "❌ Error: Must provide a JSON payload (inline string or --payload-file)."
+            )
+            return
+
+        # Call the agent
+        call(args.path, json_data)
     elif cmd == "init":
         logger.info("initialising command")
         if len(sys.argv) != 3:

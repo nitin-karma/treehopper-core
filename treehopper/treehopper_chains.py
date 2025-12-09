@@ -1056,7 +1056,7 @@ def chain_entry(argv: List[str]) -> None:
         print_chain_help()
         sys.exit(1)
 
-    sub = argv[0]
+    sub = argv[0].lower()
 
     if sub in {
         "build",

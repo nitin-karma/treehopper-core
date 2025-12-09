@@ -1,0 +1,24 @@
+agent_name: pdf_extractor
+agent_id: pdf_extractor-a1b2c3d4
+subscription_id: a75110fc-0cec-45fc-8ca7-edfe63744497
+entrypoint: /pdf_extractor
+description: Extract text content from PDF documents
+inputs:
+  - name: file_path
+    type: string
+    description: Path to PDF file in shared storage
+outputs:
+  - name: extracted_text
+    type: string
+    description: Full text content from PDF
+  - name: page_count
+    type: integer
+    description: Number of pages processed
+  - name: file_name
+    type: string
+    description: Original filename
+tags:
+  - document-processing
+  - pdf
+  - extraction
+version: '1.0'

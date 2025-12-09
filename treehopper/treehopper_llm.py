@@ -6,6 +6,9 @@ import random
 import asyncio
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
+from treehopper.logging import get_logger
+
+logger = get_logger()
 
 load_dotenv()
 
@@ -157,6 +160,7 @@ async def call_llm(
 
 async def call_openai(prompt: str, api_key: str | None, timeout: float):
     headers = {"Authorization": f"Bearer {api_key or os.getenv('OPENAI_API_KEY')}"}
+    logger.info(headers)
 
     body = {
         "model": os.getenv("TH_OPENAI_MODEL", "gpt-4o-mini"),

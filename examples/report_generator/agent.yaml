@@ -1,0 +1,36 @@
+agent_name: report_generator
+agent_id: report_generator-i9j0k1l2
+subscription_id: a75110fc-0cec-45fc-8ca7-edfe63744497
+entrypoint: /report_generator
+description: Generate formatted markdown report from analysis results
+inputs:
+  - name: file_name
+    type: string
+    description: Original document filename
+  - name: page_count
+    type: integer
+    description: Number of pages
+  - name: sentiment
+    type: string
+    description: Sentiment analysis result
+  - name: key_entities
+    type: array
+    description: Key entities found
+  - name: summary
+    type: string
+    description: Content summary
+  - name: themes
+    type: array
+    description: Main themes
+outputs:
+  - name: report_markdown
+    type: string
+    description: Formatted markdown report
+  - name: report_title
+    type: string
+    description: Report title
+tags:
+  - reporting
+  - formatting
+  - output
+version: '1.0'
