@@ -27,7 +27,7 @@ from fastapi.openapi.utils import get_openapi
 # ======================================================================
 # 3. Local/Project Imports
 # ======================================================================
-from treehopper.th_config import VERSION
+from treehopper.th_config import VERSION, DEFAULT_API_KEY
 import treehopper.th_config as _cfg
 from treehopper.agent_runtime import run_agent_path
 from treehopper.utils import run_registry as run_registry_mod
@@ -47,7 +47,7 @@ from treehopper.treehopper_cancellation import (
 
 # Setting environment variables
 os.environ["TREEHOPPER_RUNTIME_MODE"] = "1"
-API_KEY = os.getenv("TREEHOPPER_API_KEY", "demo-key-123")
+API_KEY = os.getenv("TREEHOPPER_API_KEY", DEFAULT_API_KEY)
 API_KEY_HEADER = APIKeyHeader(name="x-api-key", auto_error=False)
 # ======================================================================
 # FORCE LOCAL SOURCE (dev mode)

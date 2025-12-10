@@ -28,7 +28,8 @@ MAIN_PID_FILE = RUNTIME_DIR / "main_server.pid"
 CHAIN_PID_PREFIX = "det_chain_"
 
 # HTTP defaults
-API_KEY = {"x-api-key": "demo-key-123"}
+DEFAULT_API_KEY = "demo-key-123"
+API_KEY = {"x-api-key": DEFAULT_API_KEY}
 MAIN_PORT = int(os.getenv("TH_PORT", "1567"))
 BASE_URL = f"http://localhost:{MAIN_PORT}"
 
