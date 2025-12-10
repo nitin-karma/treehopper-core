@@ -25,16 +25,16 @@ from fastapi.security import APIKeyHeader
 from dotenv import load_dotenv
 import chromadb
 
-# REMOVED: from typing import Any
+from typing import Any
 import yaml
 from pydantic import BaseModel
 
 # local imports
-# from treehopper.utils.run_registry import (
-# REMOVED: record_chain_run,
-# REMOVED: list_chain_runs as rr_list_chain_runs,
-# REMOVED: get_chain_run as rr_get_chain_run,
-# )
+from treehopper.utils.run_registry import (
+    record_chain_run,
+    list_chain_runs as rr_list_chain_runs,
+    # REMOVED: get_chain_run as rr_get_chain_run,
+)
 from treehopper.utils.config import read_config
 from treehopper.th_config import (
     # REMOVED: HOME,
@@ -501,7 +501,85 @@ async def _execute_agent_step(path: str, params: dict) -> dict:
     return res
 
 
-@router_dev.post("/chain")
+@router_chains.post("/{chain_name}/run")
+async def run_chain_endpoint(chain_name: str, payload: dict | None = None):
+    """
+    Main-server chain runner.
+
+    Semantics:
+      - First agent gets the root payload (validated against its declared inputs).
+      - Subsequent agents get params mapped from previous step's output.
+      - Full run is recorded via run_registry (last_run + runs/<run_id>.json).
+    """
+    print("[run_chain_endpoint] starting")
+    cfg, chain_dir = resolve_chain_by_name(chain_name)
+    agents_cfg = cfg.get("agents", [])
+
+    if not agents_cfg:
+        raise HTTPException(
+            status_code=400, detail=f"Chain has no agents: {chain_name}"
+        )
+
+    results: list[Any] = []
+    prev_output: dict[str, Any] | None = None
+    root_payload: dict[str, Any] = payload or {}
+
+    for idx, step in enumerate(agents_cfg):
+        # Validate FIRST STEP required inputs exist
+        if idx == 0:
+            declared = [i.get("name") for i in step.get("inputs", []) if i.get("name")]
+            missing = [d for d in declared if d not in root_payload]
+            if missing:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Missing required input(s) for first step "
+                        f"'{step.get('agent_name')}': {missing}"
+                    ),
+                )
+
+        # Build params for execution
+        if idx == 0:
+            params: dict[str, Any] = dict(root_payload)
+        else:
+            params = {}
+            for inp in step.get("inputs", []):
+                k = inp.get("name")
+                if k and isinstance(prev_output, dict) and k in prev_output:
+                    params[k] = prev_output[k]
+
+        result = await _execute_agent_step(step["path"], params)
+        results.append(result)
+        prev_output = result if isinstance(result, dict) else {"result": result}
+
+    # delegate persistence to run_registry (also writes last_run.json)
+    history = record_chain_run(
+        chain_name=cfg.get("chain_name", chain_name),
+        chain_id=cfg.get("chain_id"),
+        chain_dir=chain_dir,
+        payload=root_payload,
+        results=results,
+        detached=False,
+        success=True,
+    )
+    return history
+
+
+@router_chains.get("/{chain_name}/runs")
+async def list_chain_runs(chain_name: str, limit: int = 50):
+    """
+    List recent runs for a chain (summary).
+    """
+    cfg, chain_dir = resolve_chain_by_name(chain_name)
+    runs = rr_list_chain_runs(chain_dir, limit=limit)
+    return {
+        "chain_name": cfg.get("chain_name", chain_name),
+        "chain_id": cfg.get("chain_id"),
+        "runs": runs,
+    }
+
+
+@router_dev.post("/chain", include_in_schema=False)
 async def chain(body: dict):
     outputs: list[dict] = []
     for step in body.get("chain", []):

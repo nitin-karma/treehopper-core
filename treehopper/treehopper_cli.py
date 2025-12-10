@@ -404,9 +404,39 @@ def list_agents() -> None:
         for agent in agents
     ]
     logger.info(
-        tabulate(table_data, headers=["AGENT PATH", "GOAL", "TAGS"], tablefmt="grid")
+        tabulate(table_data, headers=["AGENT EP", "GOAL", "TAGS"], tablefmt="grid")
     )
-    print(tabulate(table_data, headers=["AGENT PATH", "GOAL", "TAGS"], tablefmt="grid"))
+    print(tabulate(table_data, headers=["AGENT EP", "GOAL", "TAGS"], tablefmt="grid"))
+
+
+def list_chains() -> None:
+    ensure_server()
+    r = requests.get(f"{BASE_URL}/api/v1/dev/chains", headers=API_KEY)
+    r.raise_for_status()
+    chains = r.json()
+    table_data = [
+        [
+            chain["chain_name"],
+            chain["endpoint"],
+            ", ".join(chain.get("agents", [])),
+            chain["created_at"],
+        ]
+        for chain in chains
+    ]
+    logger.info(
+        tabulate(
+            table_data,
+            headers=["CHAIN NAME", "ENDPOINT", "AGENTS", "CREATED AT"],
+            tablefmt="grid",
+        )
+    )
+    print(
+        tabulate(
+            table_data,
+            headers=["CHAIN NAME", "ENDPOINT", "AGENTS", "CREATED AT"],
+            tablefmt="grid",
+        )
+    )
 
 
 # ---------------------------------------------------------------------
@@ -1002,6 +1032,7 @@ def agent_run_detached(
 
 def agent_stop(ref: str) -> None:
     meta = resolve_agent_meta(ref)
+    print(f"This will stop detached agent '{meta['agent_name']}'")
     agent_id = meta["agent_id"]
     pid_file = RUNTIME_DIR / f"{AGENT_RUNTIME_PREFIX}{agent_id}.pid"
     pid = read_pid(pid_file)
@@ -1036,7 +1067,8 @@ Treehopper CLI Commands
   [treehopper | th] run --bg                              Start the main server in background
   [treehopper | th] stop                                  Stop the main server
   [treehopper | th] restart                               Restart main server
-  [treehopper | th] list                                  List installed agents
+  [treehopper | th] list_agents                           List installed agents
+  [treehopper | th] list_chains                           List installed chains
   [treehopper | th] clean                                 Be Careful - To cleanup the servers, pids, agents, chain
 
   Agent Related CLI Commands -
@@ -1047,7 +1079,7 @@ Treehopper CLI Commands
   [treehopper | th] lint <agent_folder>                   Validate handler.py + YAML
   [treehopper | th] build <agent_folder>                  Install agent to registry and run with main server
   [treehopper | th] agent info <ref>                      Show metadata
-  [treehopper | th] agent run <name> --detached [--bg]    Start dedicated agent runtime (optionally in background)
+  [treehopper | th] agent run <name> --detached           Start dedicated agent runtime in background
   [treehopper | th] agent delete <ref>                    Delete installed agent safely
 
 
@@ -1068,7 +1100,8 @@ Treehopper CLI Commands
   [treehopper | th] run --bg                              Start the main server in background
   [treehopper | th] stop                                  Stop the main server
   [treehopper | th] restart                               Restart main server
-  [treehopper | th] list                                  List installed agents
+  [treehopper | th] list_agents                           List installed agents
+  [treehopper | th] list_chains                           List installed chains
   [treehopper | th] clean                                 Be Careful - To cleanup the servers, pids, agents, chain
 
   Agent Related CLI Commands -
@@ -1079,7 +1112,7 @@ Treehopper CLI Commands
   [treehopper | th] lint <agent_folder>                   Validate handler.py + YAML
   [treehopper | th] build <agent_folder>                  Install agent to registry and run with main server
   [treehopper | th] agent info <ref>                      Show metadata
-  [treehopper | th] agent run <name> --detached [--bg]    Start dedicated agent runtime (optionally in background)
+  [treehopper | th] agent run <name> --detached           Start dedicated agent runtime in background
   [treehopper | th] agent delete <ref>                    Delete installed agent safely
 
 
@@ -1114,9 +1147,13 @@ def main() -> None:
     elif cmd == "restart":
         logger.info("restart command")
         restart()
-    elif cmd == "list":
-        logger.info("list command")
+    elif cmd == "list_agents":
+        logger.info("agent list command")
         list_agents()
+    elif cmd == "list_chains":
+        logger.info("chains list command")
+        list_chains()
+
     elif cmd == "call":
         logger.info("call command")
         parser = argparse.ArgumentParser(

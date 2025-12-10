@@ -36,7 +36,7 @@ BASE_URL = f"http://localhost:{MAIN_PORT}"
 VERSION = "0.1.0"
 
 # Cancellation request timeout seconds
-CANCEL_TIMEOUT = 10  # safe but configurable
+CANCEL_TIMEOUT = 30  # safe but configurable
 
 # Subscription path
 SUBSCRIPTION_FILE = TH_ROOT / "subscription_id.txt"

@@ -85,6 +85,8 @@ Respond ONLY with valid JSON in this format:
                 "key_entities": [],
                 "summary": response_text[:200],
                 "themes": [],
+                "file_name": payload.file_name,
+                "page_count": payload.page_count,
             }
 
         print(f"[content_analyzer] Analysis complete: {analysis.get('sentiment')}")
@@ -94,6 +96,8 @@ Respond ONLY with valid JSON in this format:
             "key_entities": analysis.get("key_entities", []),
             "summary": analysis.get("summary", ""),
             "themes": analysis.get("themes", []),
+            "file_name": payload.file_name,
+            "page_count": payload.page_count,
         }
 
     except asyncio.CancelledError:

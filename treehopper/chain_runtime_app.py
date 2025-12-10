@@ -20,6 +20,9 @@ from fastapi import FastAPI, Body, HTTPException, Request, APIRouter
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi import Security
+from fastapi.security import APIKeyHeader
+from fastapi.openapi.utils import get_openapi
 
 # ======================================================================
 # 3. Local/Project Imports
@@ -44,7 +47,8 @@ from treehopper.treehopper_cancellation import (
 
 # Setting environment variables
 os.environ["TREEHOPPER_RUNTIME_MODE"] = "1"
-
+API_KEY = os.getenv("TREEHOPPER_API_KEY", "demo-key-123")
+API_KEY_HEADER = APIKeyHeader(name="x-api-key", auto_error=False)
 # ======================================================================
 # FORCE LOCAL SOURCE (dev mode)
 # ======================================================================
@@ -119,6 +123,37 @@ else:
 # ======================================================================
 app = FastAPI(title=f"Treehopper v{VERSION} Chain Runtime ({CHAIN_NAME})")
 
+
+app.openapi_schema = None
+
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    openapi_schema = get_openapi(
+        title=app.title,
+        version="1.0",
+        routes=app.routes,
+    )
+
+    # Define API key security scheme
+    openapi_schema["components"]["securitySchemes"] = {
+        "APIKeyHeader": {"type": "apiKey", "in": "header", "name": "x-api-key"}
+    }
+
+    # Apply to all endpoints
+    for path in openapi_schema["paths"]:
+        for method in openapi_schema["paths"][path]:
+            openapi_schema["paths"][path][method]["security"] = [{"APIKeyHeader": []}]
+
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
+
+
 # ======================================================================
 # STATIC + DOCS
 # ======================================================================
@@ -126,6 +161,12 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 if os.path.isdir(STATIC_DIR):
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+async def verify_api_key(key: str = Security(API_KEY_HEADER)):
+    if key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    return key
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -176,7 +217,7 @@ def _load_run_json(run_file: Path) -> Optional[Dict[str, Any]]:
 
 
 @app.get(f"/api/v1/{CHAIN_NAME}/status/{{run_id}}")
-async def chain_status(run_id: str):
+async def chain_status(run_id: str, api_key: str = Security(verify_api_key)):
     if not CHAIN_DIR:
         raise HTTPException(500, "CHAIN_DIR not configured")
 
@@ -207,7 +248,7 @@ runtime_cancel = APIRouter(prefix="/api/v1/cancel")
 
 
 @runtime_cancel.post("/run/{run_id}")
-async def runtime_local_cancel(run_id: str):
+async def runtime_local_cancel(run_id: str, api_key: str = Security(verify_api_key)):
     """
     RUNTIME LOCAL CANCEL ENDPOINT.
     Only updates FS marker — does not call central cancel routine.
@@ -238,7 +279,11 @@ app.include_router(runtime_cancel)
 # DETACHED CHAIN EXECUTION ENDPOINT
 # ======================================================================
 @app.post(f"/api/v1/{CHAIN_NAME}/run")
-async def run_chain(request: Request, payload: dict = Body(default={})):
+async def run_chain(
+    request: Request,
+    payload: dict = Body(default={}),
+    api_key: str = Security(verify_api_key),
+):
     print("[CHAIN RUN TIME] to run the chain")
     agents_spec: List[Dict[str, Any]] = CHAIN_CFG.get("agents", [])
     if not agents_spec:
@@ -252,10 +297,10 @@ async def run_chain(request: Request, payload: dict = Body(default={})):
         "x-treehopper-batch-id"
     )
 
+    # 🟢 If Swagger or curl didn't send run_id → auto-generate one
     if not run_id:
-        raise HTTPException(
-            status_code=400, detail="Detached runtime ERROR: run_id missing."
-        )
+        run_id = run_registry_mod.make_run_id(CHAIN_NAME)
+        print(f"[runtime] Auto-generated run_id={run_id} (Swagger/manual call)")
 
     print(f"[runtime] Using CHAIN_DIR = {CHAIN_DIR}")
     print(f"[runtime] CANCEL_DIR = {CANCEL_DIR}")

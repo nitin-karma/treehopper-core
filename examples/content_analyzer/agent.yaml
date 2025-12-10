@@ -6,10 +6,13 @@ description: Analyze document content using AI (sentiment, key entities, themes)
 inputs:
   - name: extracted_text
     type: string
-    description: Text content to analyze
+    description: Full text content from PDF
+  - name: page_count
+    type: integer
+    description: Number of pages processed
   - name: file_name
     type: string
-    description: Original filename for context
+    description: Original filename
 outputs:
   - name: sentiment
     type: string

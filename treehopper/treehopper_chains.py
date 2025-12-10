@@ -392,8 +392,9 @@ def chain_run_local(chain_ref: ChainRef, payload: Dict[str, Any]) -> None:
     ensure_main_server()
     cfg = load_chain_cfg(chain_ref)
     endpoint = cfg.get("endpoint") or f"/api/v1/chains/{chain_ref.chain_name}"
+    # endpoint = f"/api/v1/chains/run/{chain_ref.chain_name}"
 
-    url = f"{BASE_URL}{endpoint}"
+    url = f"{BASE_URL}{endpoint}/run"
 
     # --- Auto file_path injection for first agent if payload is empty ---
     cfg = load_chain_cfg(chain_ref)
@@ -508,6 +509,27 @@ def chain_run_detached(
         # 🔥 CRITICAL PATCH — Inject absolute, unified FS paths into runtime
         # ======================================================================
         env = os.environ.copy()
+
+        # ------------------------------------------------------------------
+        # ⭐ CLEAN FIX: Forward ONLY essential LLM environment variables
+        # ------------------------------------------------------------------
+        LLM_ENV_KEYS = [
+            "TH_LLM_PROVIDER",
+            "TH_TEST_MODE",
+            "OPENAI_API_KEY",
+            "PERPLEXITY_API_KEY",
+            "GEMINI_API_KEY",
+            "TH_OPENAI_MODEL",
+            "TH_PERPLEXITY_MODEL",
+            "TH_GEMINI_MODEL",
+            "TH_OPENAI_TEMPERATURE",
+        ]
+
+        for key in LLM_ENV_KEYS:
+            value = os.getenv(key)
+            if value:
+                env[key] = value
+        # ------------------------------------------------------------------
         env["CHAIN_NAME"] = chain_ref.chain_name
         env["CHAIN_ID"] = chain_ref.chain_id
         env["CHAIN_DIR"] = str(chain_ref.dir_path)
