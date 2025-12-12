@@ -374,6 +374,23 @@ def ensure_server() -> None:
 
 
 def call(path: str, params: dict) -> None:
+    if not path or path == "":
+        logger.error("Agent name or API path is not provided")
+        print("Agent name or API path is not provided")
+        return
+    if "/" not in path:
+        print(f"Full Agent path is not provided for - {path}")
+        print(
+            f"Trying to create the full agent path like - \
+             /api/v1/agents/{path}"
+        )
+        logger.warn(f"Full Agent path is not provided for - {path}")
+        logger.warn(
+            f"Trying to create the full agent path like - \
+             /api/v1/dev/agents/{path}"
+        )
+        path = f"/api/v1/agents/{path}"
+
     ensure_server()
     r = requests.get(f"{BASE_URL}/api/v1/dev/agents", headers=API_KEY)
     r.raise_for_status()
