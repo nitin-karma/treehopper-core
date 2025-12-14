@@ -1082,8 +1082,6 @@ Cancellation Support Matrix
 | chain run --detached                    |     YES      | async micro-app runtime         |
 | chain run --detached --bg               |     YES      | async runtime with background   |
 | chain run (non-detached)                |     NO       | blocking HTTP request           |
-| chain run --parallel N                  |     NO       | each run is blocking            |
-| chain run --parallel N --detached       |     NO       | still blocking main-thread POST |
 
 Resume Functionality (Hybrid)
 ───────────────────────────────────────────────────────────────────────────────
@@ -1468,6 +1466,8 @@ def validate_input_resolution(cfg):
             spec = load_agent_spec(agent["agent_name"])
 
             for inp in spec["inputs"]:
+                if inp.get("required", True) is False:
+                    continue
                 name = inp["name"]
                 source = inp.get("source")
                 logger.info(f"Source - {source}")

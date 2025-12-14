@@ -558,15 +558,29 @@ async def _execute_agent_step(path: str, params: dict) -> dict:
 @router_chains.post("/{chain_name}/run")
 async def run_chain_endpoint(chain_name: str, payload: dict | None = None):
     """
-    Main-server chain runner.
+    Main-server chain runner (sequential chains only).
 
     Semantics:
-      - First agent gets the root payload (validated against its declared inputs).
-      - Subsequent agents get params mapped from previous step's output.
-      - Full run is recorded via run_registry (last_run + runs/<run_id>.json).
+      - First agent gets root payload
+      - Only REQUIRED inputs are validated
+      - Optional inputs are skipped if missing
+      - Subsequent agents receive outputs from previous step
     """
-    print("[run_chain_endpoint] starting")
+    print("[run_chain_endpoint] starting from main server")
+
     cfg, chain_dir = resolve_chain_by_name(chain_name)
+
+    if "steps" in cfg:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This chain uses multi-step execution.\n"
+                "Multi-step / parallel / routed chains must be run in detached mode.\n\n"
+                "Use:\n"
+                f"  th chain run {chain_name} --detached"
+            ),
+        )
+
     agents_cfg = cfg.get("agents", [])
 
     if not agents_cfg:
@@ -579,10 +593,18 @@ async def run_chain_endpoint(chain_name: str, payload: dict | None = None):
     root_payload: dict[str, Any] = payload or {}
 
     for idx, step in enumerate(agents_cfg):
-        # Validate FIRST STEP required inputs exist
+
+        inputs = step.get("inputs", [])
+
+        # -------------------------------
+        # FIRST STEP VALIDATION (FIXED)
+        # -------------------------------
         if idx == 0:
-            declared = [i.get("name") for i in step.get("inputs", []) if i.get("name")]
-            missing = [d for d in declared if d not in root_payload]
+            required_inputs = [
+                i["name"] for i in inputs if i.get("name") and i.get("required", True)
+            ]
+
+            missing = [k for k in required_inputs if k not in root_payload]
             if missing:
                 raise HTTPException(
                     status_code=400,
@@ -592,21 +614,27 @@ async def run_chain_endpoint(chain_name: str, payload: dict | None = None):
                     ),
                 )
 
-        # Build params for execution
+        # -------------------------------
+        # PARAM BUILDING
+        # -------------------------------
         if idx == 0:
             params: dict[str, Any] = dict(root_payload)
         else:
             params = {}
-            for inp in step.get("inputs", []):
-                k = inp.get("name")
-                if k and isinstance(prev_output, dict) and k in prev_output:
-                    params[k] = prev_output[k]
+            if isinstance(prev_output, dict):
+                for inp in inputs:
+                    name = inp.get("name")
+                    if not name:
+                        continue
+                    if name in prev_output:
+                        params[name] = prev_output[name]
+                    # optional inputs are silently skipped
 
         result = await _execute_agent_step(step["path"], params)
+
         results.append(result)
         prev_output = result if isinstance(result, dict) else {"result": result}
 
-    # delegate persistence to run_registry (also writes last_run.json)
     history = record_chain_run(
         chain_name=cfg.get("chain_name", chain_name),
         chain_id=cfg.get("chain_id"),
@@ -616,6 +644,7 @@ async def run_chain_endpoint(chain_name: str, payload: dict | None = None):
         detached=False,
         success=True,
     )
+
     return history
 
 
