@@ -127,3 +127,10 @@ _metrics = Metrics()
 
 def metrics() -> Metrics:
     return _metrics
+
+
+def print_helper(message: str):
+    logger = get_logger()
+    print(message.strip())
+    logger.info(message.strip())
+    return None

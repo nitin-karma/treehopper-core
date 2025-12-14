@@ -9,7 +9,7 @@ import json
 import asyncio
 import yaml
 from pathlib import Path
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, Optional, cast
 
 # from datetime import datetime
 
@@ -34,7 +34,6 @@ from treehopper.utils import run_registry as run_registry_mod
 from treehopper.runtime_context import set_run_id, reset_run_id
 from treehopper.middleware.cancellation_guard import cancellation_guard
 from treehopper.treehopper_cancellation import (
-    is_run_cancelled,
     update_cancel_marker_with_runtime,
     create_cancel_marker,
     run_with_cancellation,
@@ -99,6 +98,74 @@ except Exception:
 # ======================================================================
 # ENV: CHAIN INFO
 # ======================================================================
+# ======================================================================
+# BUILTIN RUNTIME PRIMITIVES (NOT AGENTS)
+# ======================================================================
+
+
+def builtin_language_detect(text: Optional[str]) -> Dict[str, Any]:
+    if not text or not isinstance(text, str):
+        return {"language": "unknown", "confidence": 0.0}
+
+    t = text.lower()
+    if any(w in t for w in (" the ", " and ", " is ", " of ")):
+        return {"language": "en", "confidence": 0.95}
+
+    return {"language": "unknown", "confidence": 0.4}
+
+
+def builtin_merge_parallel(parallel_results: list) -> Dict[str, Any]:
+    """
+    Generic fan-in merge.
+    Deterministic, last-write-wins.
+    """
+    merged: Dict[str, Any] = {}
+
+    for item in parallel_results:
+        output = item.get("output", {})
+        if isinstance(output, dict):
+            merged.update(output)
+
+    # Optional enrichment
+    text = merged.get("extracted_text") or merged.get("text")
+    if text:
+        merged["_meta"] = builtin_language_detect(text)
+
+    return merged
+
+
+BUILTIN_MERGE_RUNTIME = {
+    "smart_data_aggregator": builtin_merge_parallel,
+    "default": builtin_merge_parallel,
+}
+
+
+def normalize_chain_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Backward compatibility:
+    Convert v1 chain format (agents[]) → v2 steps[]
+    """
+    if "steps" in cfg:
+        return cfg
+
+    agents = cfg.get("agents", [])
+    if not agents:
+        raise RuntimeError("Invalid chain config: no agents or steps defined")
+
+    steps = []
+    for idx, agent in enumerate(agents):
+        steps.append(
+            {
+                "step_id": f"step_{idx+1}",
+                "execution_mode": "sequential",
+                "agents": [agent],
+            }
+        )
+
+    cfg["steps"] = steps
+    return cfg
+
+
 CHAIN_NAME = cast(str, os.getenv("CHAIN_NAME"))
 CHAIN_ID = os.getenv("CHAIN_ID")
 CHAIN_DIR_ENV = os.getenv("CHAIN_DIR")
@@ -117,6 +184,8 @@ if CHAIN_DIR_ENV:
     CHAIN_CFG = yaml.safe_load(cfg_path.read_text())
 else:
     CHAIN_CFG = {"chain_name": CHAIN_NAME, "agents": []}
+# ✅ ADD THIS LINE
+CHAIN_CFG = normalize_chain_cfg(CHAIN_CFG)
 
 # ======================================================================
 # FASTAPI APP
@@ -204,8 +273,59 @@ async def health():
 
 
 # ======================================================================
-# NEW: STATUS ENDPOINT (PATCH #3)
+# Helper Functions
 # ======================================================================
+
+
+def resolve_input(
+    source: Optional[str],
+    state: Dict[str, Dict[str, Any]],
+    root_payload: Dict[str, Any],
+    fallback_key: Optional[str] = None,
+):
+    """
+    Resolution order:
+    1. Explicit source: step.agent.field
+    2. Implicit: previous step's agent output by key
+    3. Request payload fallback
+    """
+    print(
+        f"[resolve_input] source={source}, key={fallback_key}, "
+        f"state_keys={list(state.keys())}, "
+    )
+    # 1️⃣ Explicit mapping
+    if source:
+        if source == "request":
+            # request means entire request payload OR direct key
+            if fallback_key and fallback_key in root_payload:
+                return root_payload[fallback_key]
+            return root_payload
+        try:
+            step, agent, field = source.split(".", 2)
+            return state.get(step, {}).get(agent, {}).get(field)
+        except Exception:
+            return None
+
+    # 2️⃣ IMPLICIT SEQUENTIAL MAPPING
+    if state and fallback_key:
+        step_ids = list(state.keys())
+        if len(step_ids) >= 2:
+            prev_step_id = step_ids[-2]
+            for agent_output in state.get(prev_step_id, {}).values():
+                if isinstance(agent_output, dict) and fallback_key in agent_output:
+                    return agent_output[fallback_key]
+
+    # 3️⃣ Request payload fallback
+    if fallback_key:
+        return root_payload.get(fallback_key)
+    return None
+
+
+def flatten_namespaced(step_id: str, agent: str, output: Dict[str, Any]):
+    flat = {}
+    for k, v in output.items():
+        flat[f"{step_id}.{agent}.{k}"] = v
+    return flat
 
 
 def _load_run_json(run_file: Path) -> Optional[Dict[str, Any]]:
@@ -285,9 +405,9 @@ async def run_chain(
     api_key: str = Security(verify_api_key),
 ):
     print("[CHAIN RUN TIME] to run the chain")
-    agents_spec: List[Dict[str, Any]] = CHAIN_CFG.get("agents", [])
-    if not agents_spec:
-        raise HTTPException(status_code=400, detail="Chain has no agents configured")
+    steps = CHAIN_CFG.get("steps", [])
+    if not steps:
+        raise HTTPException(status_code=400, detail="Chain has no steps configured")
 
     root_payload = payload or {}
     run_id = request.headers.get("X-Treehopper-Run-Id") or request.headers.get(
@@ -326,164 +446,151 @@ async def run_chain(
 
     async def _execute_chain():
         nonlocal root_payload
-        results: List[Any] = []
-        prev_output: Dict[str, Any] | None = None
 
-        # -------------------------------
-        # STARTING
-        # -------------------------------
+        steps = CHAIN_CFG.get("steps", [])
+        runtime_state: Dict[str, Dict[str, Any]] = {}
+        namespaced: Dict[str, Any] = {}
+
         run_registry_mod.record_chain_run(
             chain_name=CHAIN_NAME,
             chain_id=CHAIN_ID,
             chain_dir=CHAIN_DIR,
             payload=root_payload,
-            results=results,
+            results=[],
             detached=True,
             success=False,
             run_id=run_id,
-            cancelled=False,
             status="starting",
             current_step_index=-1,
         )
 
-        for idx, step in enumerate(agents_spec):
-            path = step.get("path")
-            inputs = step.get("inputs", [])
+        step_index = 0
 
-            # -------------------------------
-            # PRE-CANCEL CHECK
-            # -------------------------------
-            print(f"[RUNTIME] Pre-step cancel check for step {idx}, run_id={run_id}")
-            if await is_run_cancelled(run_id):
-                print(f"[RUNTIME] CANCELLED before starting step {idx}")
-                return run_registry_mod.record_chain_run(
-                    chain_name=CHAIN_NAME,
-                    chain_id=CHAIN_ID,
-                    chain_dir=CHAIN_DIR,
-                    payload=root_payload,
-                    results=results,
-                    detached=True,
-                    success=False,
-                    run_id=run_id,
-                    cancelled=True,
-                    status="cancelled",
-                    current_step_index=idx,
-                )
+        while step_index < len(steps):
+            step = steps[step_index]
+            step_id = step["step_id"]
+            mode = step.get("execution_mode", "sequential")
+            agents = step.get("agents", [])
+            merge_agent = step.get("merge_agent")
+            routes = step.get("route_on", [])
 
-            # -------------------------------
-            # PREP INPUTS
-            # -------------------------------
-            if idx == 0:
-                params = dict(root_payload)
-            else:
-                params = {}
-                if prev_output:
-                    if inputs:
-                        for inp in inputs:
-                            nm = inp.get("name")
-                            if nm in prev_output:
-                                params[nm] = prev_output[nm]
-                    else:
-                        params = dict(prev_output)
+            runtime_state[step_id] = {}
 
-            # ======================================================
-            # ⭐ CRITICAL FIX ⭐ — deterministic "running" state write
-            # ======================================================
             run_registry_mod.record_chain_run(
                 chain_name=CHAIN_NAME,
                 chain_id=CHAIN_ID,
                 chain_dir=CHAIN_DIR,
                 payload=root_payload,
-                results=results,
+                results=[],
                 detached=True,
                 success=False,
                 run_id=run_id,
-                cancelled=False,
                 status="running",
-                current_step_index=idx,
-            )
-            # ======================================================
-
-            # -------------------------------
-            # FINAL CANCEL CHECK BEFORE EXEC
-            # -------------------------------
-            if await is_run_cancelled(run_id):
-                print(f"[RUNTIME] CANCELLED just before executing step {idx}")
-                return run_registry_mod.record_chain_run(
-                    chain_name=CHAIN_NAME,
-                    chain_id=CHAIN_ID,
-                    chain_dir=CHAIN_DIR,
-                    payload=root_payload,
-                    results=results,
-                    detached=True,
-                    success=False,
-                    run_id=run_id,
-                    cancelled=True,
-                    status="cancelled",
-                    current_step_index=idx,
-                )
-
-            # -------------------------------
-            # EXECUTE AGENT
-            # -------------------------------
-            try:
-                print(f"[RUNTIME] Executing step {idx} via {path} (run_id={run_id})")
-                step_result = await cancellation_guard(
-                    run_agent_path(path, params), run_id, idx
-                )
-            except asyncio.CancelledError:
-                print(f"[cancellation_guard] CANCELLED at step={idx}, run_id={run_id}")
-                return run_registry_mod.record_chain_run(
-                    chain_name=CHAIN_NAME,
-                    chain_id=CHAIN_ID,
-                    chain_dir=CHAIN_DIR,
-                    payload=root_payload,
-                    results=results,
-                    detached=True,
-                    success=False,
-                    run_id=run_id,
-                    cancelled=True,
-                    status="cancelled",
-                    current_step_index=idx,
-                )
-            except Exception as e:
-                print(f"[RUNTIME] Step {idx} failed: {e}")
-                return run_registry_mod.record_chain_run(
-                    chain_name=CHAIN_NAME,
-                    chain_id=CHAIN_ID,
-                    chain_dir=CHAIN_DIR,
-                    payload=root_payload,
-                    results=results + [{"error": str(e)}],
-                    detached=True,
-                    success=False,
-                    run_id=run_id,
-                    cancelled=False,
-                    status="failed",
-                    current_step_index=idx,
-                )
-
-            results.append(step_result)
-            prev_output = (
-                step_result
-                if isinstance(step_result, dict)
-                else {"result": step_result}
+                current_step_index=step_index,
             )
 
-        # -------------------------------
-        # COMPLETED SUCCESSFULLY
-        # -------------------------------
+            # -------------------------
+            # SEQUENTIAL STEP
+            # -------------------------
+
+            if mode == "sequential":
+                ag = agents[0]
+                params = {}
+                for inp in ag.get("inputs", []):
+                    val = resolve_input(
+                        inp.get("source"),
+                        runtime_state,
+                        root_payload,
+                        fallback_key=inp["name"],
+                    )
+                    params[inp["name"]] = val
+                print(
+                    f"[runtime] Step={step_id}, Agent={ag['agent_name']}, Params={params}"
+                )
+                result = await cancellation_guard(
+                    run_agent_path(ag["path"], params),
+                    run_id,
+                    step_index,
+                )
+
+                runtime_state[step_id][ag["agent_name"]] = result
+                namespaced.update(flatten_namespaced(step_id, ag["agent_name"], result))
+
+                step_output = result
+
+            # -------------------------
+            # PARALLEL STEP
+            # -------------------------
+            else:
+
+                async def run_one(agent):
+                    params = {}
+                    for inp in agent.get("inputs", []):
+                        params[inp["name"]] = resolve_input(
+                            inp.get("source"),
+                            runtime_state,
+                            root_payload,
+                            fallback_key=inp["name"],
+                        )
+                    out = await cancellation_guard(
+                        run_agent_path(agent["path"], params),
+                        run_id,
+                        step_index,
+                    )
+                    return {"agent": agent["agent_name"], "output": out}
+
+                parallel_results = await asyncio.gather(*[run_one(a) for a in agents])
+
+                for item in parallel_results:
+                    runtime_state[step_id][item["agent"]] = item["output"]
+                    namespaced.update(
+                        flatten_namespaced(step_id, item["agent"], item["output"])
+                    )
+
+                # ---- MERGE ----
+                # ---- MERGE (BUILTIN, LOCKED) ----
+                merge_key = merge_agent or "default"
+
+                merge_fn = BUILTIN_MERGE_RUNTIME.get(merge_key)
+                if not merge_fn:
+                    raise RuntimeError(
+                        f"Unknown merge-agent '{merge_key}'. "
+                        f"Available: {list(BUILTIN_MERGE_RUNTIME.keys())}"
+                    )
+
+                step_output = merge_fn(parallel_results)
+
+            # -------------------------
+            # CONDITIONAL ROUTING
+            # -------------------------
+            jumped = False
+            for rule in routes:
+                expr = rule["if"].replace("output.", "")
+                try:
+                    if eval(expr, {}, step_output):
+                        target = rule["goto"]
+                        step_index = next(
+                            i for i, s in enumerate(steps) if s["step_id"] == target
+                        )
+                        jumped = True
+                        break
+                except Exception:
+                    pass
+
+            if not jumped:
+                step_index += 1
+
         return run_registry_mod.record_chain_run(
             chain_name=CHAIN_NAME,
             chain_id=CHAIN_ID,
             chain_dir=CHAIN_DIR,
             payload=root_payload,
-            results=results,
+            results=runtime_state,
             detached=True,
             success=True,
             run_id=run_id,
-            cancelled=False,
             status="completed",
-            current_step_index=len(results) - 1,
+            current_step_index=len(steps) - 1,
         )
 
     # ---------------------------------------------------

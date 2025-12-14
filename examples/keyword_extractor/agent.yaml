@@ -1,0 +1,18 @@
+agent_name: keyword_extractor
+agent_id: keyword_extractor-1234abcd
+subscription_id: a75110fc-0cec-45fc-8ca7-edfe63744497
+entrypoint: /keyword_extractor
+description: Extracts top keywords from document text using an LLM.
+inputs:
+  - name: extracted_text
+    type: string
+    description: Full text extracted from the PDF
+outputs:
+  - name: keywords
+    type: array
+    description: List of extracted keywords
+tags:
+  - nlp
+  - llm
+  - keywords
+version: '1.0'

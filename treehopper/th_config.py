@@ -57,3 +57,23 @@ for _d in (TH_ROOT, REGISTRY_DIR, REGISTRY_AGENTS, CHAINS_DIR, RUNTIME_DIR, CANC
 DEFAULT_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
 DEFAULT_BACKUP_COUNT = 10  # Keep last 10 files
 DEFAULT_LOG_NAME = "treehopper"
+
+
+# Multi-step chain defaults
+DEFAULT_MAX_STEPS_PER_CHAIN = int(os.getenv("DEFAULT_MAX_STEPS_PER_CHAIN", 8))
+DEFAULT_MAX_PARALLEL_PER_STEP = int(os.getenv("DEFAULT_MAX_PARALLEL_PER_STEP", 5))
+
+# Backward compatibility aliases
+MAX_STEPS_PER_CHAIN = DEFAULT_MAX_STEPS_PER_CHAIN
+MAX_PARALLEL_PER_STEP = DEFAULT_MAX_PARALLEL_PER_STEP
+
+# ======================================================================
+# BUILTIN MERGE STRATEGIES (NOT AGENTS)
+# ======================================================================
+
+BUILTIN_MERGE_AGENTS = {
+    "smart_data_aggregator": "builtin_merge_parallel",
+    "default": "builtin_merge_parallel",
+}
+
+BUILTIN_AGENTS = {"language_detector"}

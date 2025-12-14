@@ -1,0 +1,20 @@
+agent_name: review_queue_logger
+agent_id: review_queue_logger-c5f1b2d0 # Dummy ID
+subscription_id: a75110fc-0cec-45fc-8ca7-edfe63744497
+entrypoint: /review_queue_logger
+description: Logs documents requiring manual review into a persistent queue.
+inputs:
+- name: keywords_list
+  type: array
+  description: The short list of keywords that failed the check.
+- name: document_id
+  type: string
+  description: The unique ID of the document needing review. (Assumed output from an earlier step)
+- name: review_reason
+  type: string
+  description: Reason for logging (e.g., 'Insufficient keywords').
+outputs:
+- name: queue_item_id
+  type: string
+tags: [review, logging]
+version: '1.0'

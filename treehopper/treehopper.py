@@ -319,6 +319,9 @@ async def list_agents():
 async def list_chains():
     logger.info("[MAIN RUN TIME] to list the chain")
     results: list[dict] = []
+
+    default_chain_type = "Single-step, sequential"
+
     if CHAINS_DIR.is_dir():
         for folder in CHAINS_DIR.iterdir():
             cfg_path = folder / "chain.yaml"
@@ -328,15 +331,66 @@ async def list_chains():
                 cfg = yaml.safe_load(cfg_path.read_text())
             except Exception:
                 continue
-            results.append(
-                {
-                    "chain_name": cfg.get("chain_name"),
-                    "chain_id": cfg.get("chain_id"),
-                    "endpoint": cfg.get("endpoint"),
-                    "agents": [a.get("agent_name") for a in cfg.get("agents", [])],
-                    "created_at": cfg.get("created_at"),
-                }
-            )
+
+            # --- MULTI-STEP CHAIN LOGIC ---
+            if "steps" in cfg.keys():
+                steps = cfg.get("steps", [])
+
+                # 1. Build the CHAIN TYPE string (e.g., sequential-->parallel)
+                execution_modes = [step.get("execution_mode") for step in steps]
+
+                if len(steps) == 1:
+                    chain_type = f"Multi-step, {execution_modes[0]}"
+                elif len(steps) > 1:
+                    chain_type = f"Multi-step, {'-->'.join(execution_modes)}"
+                else:
+                    chain_type = default_chain_type
+
+                # 2. Build the structured AGENTS LIST (List of Step Objects)
+                # Each item is a dictionary representing one step, maintaining order and mode.
+                ch_agents_list = []
+                for step in steps:
+                    mode = step.get("execution_mode", "SEQUENTIAL").upper()
+
+                    # Get the list of agent names for this step
+                    step_agent_names = [
+                        agent.get("agent_name") for agent in step.get("agents", [])
+                    ]
+
+                    ch_agents_list.append({mode: step_agent_names})
+
+                results.append(
+                    {
+                        "chain_name": cfg.get("chain_name"),
+                        "chain_id": cfg.get("chain_id"),
+                        "chain_type": chain_type,
+                        "endpoint": cfg.get("endpoint"),
+                        # Use the new structured list
+                        "agents": ch_agents_list,
+                        "created_at": cfg.get("created_at"),
+                    }
+                )
+
+            # --- SINGLE-STEP/LEGACY CHAIN LOGIC ---
+            else:
+                chain_type = default_chain_type
+                single_agent_names = [
+                    a.get("agent_name") for a in cfg.get("agents", [])
+                ]
+
+                # Structure single-step agents as a list containing one step object
+                ch_agents_list = [{"SEQUENTIAL": single_agent_names}]
+
+                results.append(
+                    {
+                        "chain_name": cfg.get("chain_name"),
+                        "chain_id": cfg.get("chain_id"),
+                        "chain_type": chain_type,
+                        "endpoint": cfg.get("endpoint"),
+                        "agents": ch_agents_list,
+                        "created_at": cfg.get("created_at"),
+                    }
+                )
     return results
 
 

@@ -42,3 +42,4 @@ examples/test_file.txt
 diagnostics/
 test.txt
 old_tests/
+examples/response.json

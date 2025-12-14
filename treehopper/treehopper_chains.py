@@ -1,3 +1,4 @@
+# treehopper/treehopper_chains.py
 import json
 import os
 import re
@@ -9,7 +10,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, NoReturn
 import socket
 import requests
 import yaml
@@ -44,8 +45,16 @@ from treehopper.th_config import (
     RUNTIME_DIR,
     CHAIN_PID_PREFIX,
     CANCEL_DIR,
+    DEFAULT_MAX_STEPS_PER_CHAIN,
+    DEFAULT_MAX_PARALLEL_PER_STEP,
+    BUILTIN_MERGE_AGENTS,
+    BUILTIN_AGENTS,
 )
 
+from treehopper.logging import get_logger
+
+logger = get_logger()
+logger.info("Inside Treehopper chains")
 
 # -----------------------------------------------------------------------------
 # MODELS / HELPERS
@@ -170,6 +179,60 @@ def kill_pid(pid: int) -> None:
         os.kill(pid, signal.SIGKILL)
     except ProcessLookupError:
         return
+
+
+def agent_exists(agent_name: str) -> bool:
+    """
+    Check whether an agent exists in the local registry.
+    """
+    agents = load_agents_index()
+    return any(a.get("agent_name") == agent_name for a in agents)
+
+
+def load_agent_spec(agent_name: str) -> Dict[str, Any]:
+    """
+    Load agent specification (inputs / outputs) from registry.
+
+    This is a CLI-time contract check, not a runtime import.
+    """
+    agents = load_agents_index()
+    for agent in agents:
+        if agent.get("agent_name") == agent_name:
+            return {
+                "inputs": agent.get("inputs", []),
+                "outputs": agent.get("outputs", []),
+            }
+
+    fail(f"Agent '{agent_name}' not found in registry")
+
+
+def is_input_resolvable(
+    inp: Dict[str, Any],
+    agent: Dict[str, Any],
+    available_outputs: set,
+) -> bool:
+    """
+    Determine whether an input can be resolved at runtime.
+
+    Resolution rules:
+    1. Explicit source: step.agent.field must exist
+    2. Request payload inputs are always allowed
+    3. Implicit reference to previous step outputs is allowed
+    """
+    source = inp.get("source")
+    name = inp.get("name")
+
+    # 1️⃣ Explicit request mapping
+    if source == "request":
+        return True
+
+    # 2️⃣ Explicit fully-qualified reference
+    # e.g. extract.pdf_extractor.text
+    if isinstance(source, str) and "." in source:
+        return source in available_outputs
+
+    # 3️⃣ Implicit resolution by name (from previous steps only)
+    return name in {out.split(".")[-1] for out in available_outputs}
 
 
 def ensure_main_server() -> None:
@@ -657,25 +720,28 @@ def chain_stop(ref: str) -> None:
     print("✔ Stopped")
 
 
-def chain_delete(ref: str) -> None:
+# Helper to delete a single chain (contains the core logic)
+def chain_delete_single(ref: str) -> bool:
     ensure_registry_dirs()
-    chain_ref = resolve_chain(ref)
+    try:
+        chain_ref = resolve_chain(ref)
+    except Exception as e:
+        print(f"❌ Error resolving chain '{ref}': {e}")
+        return False
 
-    # Confirm deletion
-    confirm = input(
-        f"⚠️ Delete chain '{chain_ref.chain_name}' ({chain_ref.chain_id}) permanently? y/N: "
-    )
-    if confirm.lower() not in ("y", "yes"):
-        print("❎ Cancelled")
-        return
+    # Skip confirmation when processing a list (assuming confirmation is done upfront)
+    # NOTE: I've removed the interactive confirmation here for mass deletion.
+    # If you want confirmation, it should be asked once in the new chain_delete function.
 
     pid_file = RUNTIME_DIR / f"{CHAIN_PID_PREFIX}{chain_ref.chain_id}.pid"
     pid = read_pid(pid_file)
 
     print(
-        f"[chains] DELETE requested for chain={chain_ref.chain_name} id={chain_ref.chain_id}"
+        f"\n[chains] DELETE requested for chain={chain_ref.chain_name} id={chain_ref.chain_id}"
     )
     print(f"[chains] run directory = {chain_ref.dir_path}")
+
+    success = True
 
     # Stop runtime if alive
     if pid:
@@ -687,20 +753,108 @@ def chain_delete(ref: str) -> None:
     if chain_ref.dir_path.exists():
         import shutil
 
-        shutil.rmtree(chain_ref.dir_path)
-        print("🗑 Chain directory removed")
+        try:
+            shutil.rmtree(chain_ref.dir_path)
+            print("🗑 Chain directory removed")
+        except Exception as e:
+            print(f"❌ Error removing directory {chain_ref.dir_path}: {e}")
+            success = False
 
     # Remove chain entry from index
-    index = load_chains_index()
-    index = [c for c in index if c["chain_id"] != chain_ref.chain_id]
-    save_chains_index(index)
-    print("📦 Chain removed from registry index")
+    if success:
+        index = load_chains_index()
+        original_len = len(index)
+        index = [c for c in index if c["chain_id"] != chain_ref.chain_id]
+
+        if len(index) < original_len:
+            save_chains_index(index)
+            print("📦 Chain removed from registry index")
+        else:
+            print("⚠️ Chain not found in registry index (skipped)")
+
+    chain_log_file = (
+        RUNTIME_DIR / f"chain_{chain_ref.chain_name}-{chain_ref.chain_id}.log"
+    )
+    if chain_log_file.exists():
+        chain_log_file.unlink(missing_ok=True)
+        print(f"✔ Deleted Log file, if existed - '{chain_log_file}'")
 
     # Clean up stray cancel markers
     for cancel_file in CANCEL_DIR.glob(f"{chain_ref.chain_name}-*.cancel"):
         cancel_file.unlink(missing_ok=True)
+        print(f"✔ Deleted Cancel file, if existed - '{cancel_file}'")
 
-    print(f"✔ Deleted chain '{chain_ref.chain_name}' ({chain_ref.chain_id})")
+    if success:
+        print(f"✔ Deleted chain '{chain_ref.chain_name}' ({chain_ref.chain_id})")
+    else:
+        print(
+            f"❌ Failed to delete chain '{chain_ref.chain_name}' ({chain_ref.chain_id})"
+        )
+
+    return success
+
+
+# New wrapper function to handle multiple chains
+def chain_delete(refs: List[str]) -> None:
+    if not refs:
+        print("Usage: treehopper chain delete <name|id> [<name|id>...]")
+        sys.exit(1)
+
+    if len(refs) > 1:
+        # Ask for global confirmation only if deleting multiple items
+        confirm = input(f"⚠️ Delete {len(refs)} chains permanently? y/N: ")
+        if confirm.lower() not in ("y", "yes"):
+            print("❎ Cancelled mass deletion")
+            return
+
+    for ref in refs:
+        chain_delete_single(ref)
+
+
+# def chain_delete(ref: str) -> None:
+#     ensure_registry_dirs()
+#     chain_ref = resolve_chain(ref)
+
+#     # Confirm deletion
+#     confirm = input(
+#         f"⚠️ Delete chain '{chain_ref.chain_name}' ({chain_ref.chain_id}) permanently? y/N: "
+#     )
+#     if confirm.lower() not in ("y", "yes"):
+#         print("❎ Cancelled")
+#         return
+
+#     pid_file = RUNTIME_DIR / f"{CHAIN_PID_PREFIX}{chain_ref.chain_id}.pid"
+#     pid = read_pid(pid_file)
+
+#     print(
+#         f"[chains] DELETE requested for chain={chain_ref.chain_name} id={chain_ref.chain_id}"
+#     )
+#     print(f"[chains] run directory = {chain_ref.dir_path}")
+
+#     # Stop runtime if alive
+#     if pid:
+#         print(f"🛑 Stopping chain runtime PID {pid} before delete...")
+#         kill_pid(pid)
+#         pid_file.unlink(missing_ok=True)
+
+#     # Remove directory recursively
+#     if chain_ref.dir_path.exists():
+#         import shutil
+
+#         shutil.rmtree(chain_ref.dir_path)
+#         print("🗑 Chain directory removed")
+
+#     # Remove chain entry from index
+#     index = load_chains_index()
+#     index = [c for c in index if c["chain_id"] != chain_ref.chain_id]
+#     save_chains_index(index)
+#     print("📦 Chain removed from registry index")
+
+#     # Clean up stray cancel markers
+#     for cancel_file in CANCEL_DIR.glob(f"{chain_ref.chain_name}-*.cancel"):
+#         cancel_file.unlink(missing_ok=True)
+
+#     print(f"✔ Deleted chain '{chain_ref.chain_name}' ({chain_ref.chain_id})")
 
 
 def chain_logs(ref: str) -> None:
@@ -1073,6 +1227,358 @@ def chain_sweep_resume():
     )
 
 
+def chain_build_multistep(chain_name: str, steps: List[Dict[str, Any]]):
+    """
+    Multi-step chain supporting sequential + parallel execution.
+    Input format must be:
+    [
+      { "step_id": "...", "execution_mode": "sequential|parallel", "agents": [...] },
+      ...
+    ]
+    """
+    try:
+        cname = validate_chain_name(chain_name)
+    except ValueError as e:
+        print(f"❌ {e}")
+        sys.exit(1)
+
+    ensure_registry_dirs()
+
+    if len(steps) > DEFAULT_MAX_STEPS_PER_CHAIN:
+        print(f"❌ Too many steps. Max = {DEFAULT_MAX_STEPS_PER_CHAIN}")
+        sys.exit(1)
+
+    chains_index = load_chains_index()
+    if any(c["chain_name"] == cname for c in chains_index):
+        print(f"❌ Chain '{cname}' already exists")
+        sys.exit(1)
+
+    agents_index = load_agents_index()
+    registry_by_name = {a["agent_name"]: a for a in agents_index}
+
+    # Validate steps + inject metadata
+    for step in steps:
+        mode = step.get("execution_mode")
+        agents = step.get("agents", [])
+
+        if mode == "sequential" and len(agents) != 1:
+            print("❌ Sequential step must contain exactly 1 agent")
+            sys.exit(1)
+
+        if mode == "parallel" and len(agents) > DEFAULT_MAX_PARALLEL_PER_STEP:
+            print(f"❌ Parallel step exceeds limit {DEFAULT_MAX_PARALLEL_PER_STEP}")
+            sys.exit(1)
+
+        for ag in agents:
+            name = ag["agent_name"]
+            if name not in registry_by_name:
+                print(f"❌ Unknown agent: {name}")
+                sys.exit(1)
+
+            meta = registry_by_name[name]
+            ag["path"] = meta["routes"]["by_name"]
+            ag["inputs"] = meta.get("inputs", [])
+            ag["outputs"] = meta.get("outputs", [])
+
+    # Create chain folder
+    chain_id = f"{cname}-{uuid.uuid4().hex[:8]}"
+    endpoint = f"/api/v1/chains/{cname}"
+    subscription_id = get_or_create_subscription_id()
+
+    cfg = {
+        "chain_name": cname,
+        "chain_id": chain_id,
+        "subscription_id": subscription_id,
+        "endpoint": endpoint,
+        "method": "POST",
+        "steps": steps,
+        "created_at": datetime.utcnow().isoformat() + "Z",
+        "description": f"Multi-step chain '{cname}'",
+    }
+
+    # 🔒 VALIDATION GATE (hard stop)
+    try:
+        validate_chain_cfg(cfg)
+        chain_dir = CHAINS_DIR / chain_id
+        chain_dir.mkdir(parents=True, exist_ok=False)
+    except Exception as e:
+        print(f"\n❌ Failed to build chain '{cname}'")
+        print(str(e))
+        sys.exit(1)
+
+    (chain_dir / "chain.yaml").write_text(
+        yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8"
+    )
+
+    chains_index.append(
+        {"chain_name": cname, "chain_id": chain_id, "subscription_id": subscription_id}
+    )
+    save_chains_index(chains_index)
+
+    print(f"✅ Multi-step chain created: {cname} ({chain_id})")
+    for s in steps:
+        print(f"  → Step {s['step_id']} [{s['execution_mode']}]")
+
+
+def chain_build_parallel(step_name: str, agent_names: List[str]):
+    """
+    Build a single-step chain whose only step is parallel.
+    Equivalent YAML:
+    steps:
+      - step_id: <step_name>
+        execution_mode: parallel
+        agents: [...]
+    """
+    fail(
+        """
+Invalid command: build-parallel
+
+Parallel execution is only supported inside multi-step chains.
+
+Use:
+  th chain build-steps <chain_name> \
+      --step <id> parallel \
+          --merge-agent smart_data_aggregator <agents...>
+"""
+    )
+    if len(agent_names) == 0:
+        print("❌ Provide at least one agent")
+        sys.exit(1)
+
+    if len(agent_names) > DEFAULT_MAX_PARALLEL_PER_STEP:
+        print(f"❌ Parallel step exceeds max {DEFAULT_MAX_PARALLEL_PER_STEP}")
+        sys.exit(1)
+
+    # Validate chain name
+    sname = validate_chain_name(step_name)
+
+    # Ensure agents exist
+    agents_index = load_agents_index()
+    registry_by_name = {a["agent_name"]: a for a in agents_index}
+
+    agents = []
+    for name in agent_names:
+        if name not in registry_by_name:
+            print(f"❌ Unknown agent: {name}")
+            sys.exit(1)
+
+        meta = registry_by_name[name]
+        agents.append(
+            {
+                "agent_name": name,
+                "path": meta["routes"]["by_name"],
+                "inputs": meta.get("inputs", []),
+                "outputs": meta.get("outputs", []),
+            }
+        )
+
+    step = {
+        "step_id": sname,
+        "execution_mode": "parallel",
+        "agents": agents,
+    }
+
+    # Delegate to multi-step builder with only 1 step
+    chain_build_multistep(sname, [step])
+
+
+def fail(message: str) -> NoReturn:
+    """
+    Hard-stop chain build with a clean, user-facing error.
+
+    This is intentionally NOT an exception type exposed to runtime.
+    It is a CLI validation guard.
+    """
+    print("\n❌ Chain validation failed\n")
+    print(message.strip())
+    print("\nℹ️ Fix the issue and re-run the build command.\n")
+    logger.info("\n❌ Chain validation failed\n")
+    logger.info(message.strip())
+    logger.info("\nℹ️ Fix the issue and re-run the build command.\n")
+    sys.exit(1)
+
+
+# Chain validations
+def validate_chain_cfg(chain_cfg: dict):
+    validate_limits(chain_cfg)
+    validate_step_structure(chain_cfg)
+    validate_agent_existence(chain_cfg)
+    validate_input_resolution(chain_cfg)
+    validate_merge_rules(chain_cfg)
+    validate_routing_rules(chain_cfg)
+
+
+def validate_limits(cfg):
+    max_steps = cfg.get("max_steps", DEFAULT_MAX_STEPS_PER_CHAIN)
+    max_parallel = cfg.get("max_parallel", DEFAULT_MAX_PARALLEL_PER_STEP)
+
+    steps = cfg["steps"]
+    if len(steps) > max_steps:
+        fail(f"Chain has {len(steps)} steps. Max allowed is {max_steps}")
+
+    for step in steps:
+        if step["execution_mode"] == "parallel":
+            if len(step["agents"]) > max_parallel:
+                fail(
+                    f"Step '{step['step_id']}' has {len(step['agents'])} agents. "
+                    f"Max allowed is {max_parallel}"
+                )
+
+
+def validate_step_structure(cfg):
+    for step in cfg["steps"]:
+        if step["execution_mode"] not in ("sequential", "parallel"):
+            fail(f"Invalid execution_mode in step '{step['step_id']}'")
+
+        if step["execution_mode"] == "sequential" and len(step["agents"]) != 1:
+            fail(f"Sequential step '{step['step_id']}' must have exactly one agent")
+
+
+def validate_agent_existence(cfg):
+    for step in cfg["steps"]:
+        for agent in step["agents"]:
+            name = agent["agent_name"]
+
+            if name in BUILTIN_AGENTS:
+                fail(
+                    f"""
+Invalid agent: {name}
+
+'{name}' is a builtin runtime capability and must NOT be listed as an agent.
+
+How it works:
+• Language detection is applied automatically during merge
+• Access via output.language / output.confidence
+"""
+                )
+
+            if not agent_exists(name):
+                fail(f"Agent '{name}' does not exist")
+
+
+def validate_input_resolution(cfg):
+    available_outputs: set[str] = set()
+
+    steps = cfg["steps"]
+
+    for idx, step in enumerate(steps):
+        step_outputs = set()
+
+        for agent in step["agents"]:
+            spec = load_agent_spec(agent["agent_name"])
+
+            for inp in spec["inputs"]:
+                name = inp["name"]
+                source = inp.get("source")
+                logger.info(f"Source - {source}")
+
+                # ✅ FIRST STEP: allow request inputs
+                if idx == 0:
+                    # Only allow request-bound inputs
+                    if inp.get("source") == "request":
+                        continue
+
+                    # Implicit request input is allowed ONLY if explicitly declared
+                    if inp.get("source") is None:
+                        continue
+                    fail(
+                        f"""
+Unresolved input detected
+
+Step: {step['step_id']}
+Agent: {agent['agent_name']}
+Missing input: {name}
+
+Why this happened:
+• First step inputs must come from request
+• This input is neither request-bound nor produced earlier
+
+Suggested fix:
+Add source: request
+"""
+                    )
+
+                if not is_input_resolvable(inp, agent, available_outputs):
+                    fail(
+                        f"""
+Unresolved input detected
+
+Step: {step['step_id']}
+Agent: {agent['agent_name']}
+Missing input: {name}
+
+Why this happened:
+• This step does not receive data from previous steps
+• Parallel steps cannot read sibling outputs
+• Input not found in request payload
+
+Suggested fix:
+Add a producer step before '{step['step_id']}'
+"""
+                    )
+
+            # Register outputs AFTER validation
+            for out in spec["outputs"]:
+                step_outputs.add(out["name"])
+
+        available_outputs |= step_outputs
+
+
+def validate_merge_rules(cfg):
+    for step in cfg["steps"]:
+        merge = step.get("merge_agent")
+
+        if step["execution_mode"] == "parallel":
+            if not merge:
+                fail(
+                    f"""
+Missing merge-agent
+
+Step '{step['step_id']}' is parallel but has no merge-agent.
+
+Why this matters:
+• Parallel steps produce multiple outputs
+• Downstream steps require a single merged output
+• Routing requires a deterministic 'output'
+
+Suggested fix:
+Add --merge-agent smart_data_aggregator
+"""
+                )
+
+            if merge not in BUILTIN_MERGE_AGENTS:
+                fail(
+                    f"""
+Unknown merge-agent: {merge}
+
+Allowed merge-agents:
+• {", ".join(BUILTIN_MERGE_AGENTS.keys())}
+"""
+                )
+
+        if merge and step["execution_mode"] != "parallel":
+            fail(
+                f"""
+Invalid merge-agent usage
+
+merge-agent is only allowed on parallel steps
+(step '{step['step_id']}')
+"""
+            )
+
+
+def validate_routing_rules(cfg):
+    step_ids = {s["step_id"] for s in cfg["steps"]}
+
+    for step in cfg["steps"]:
+        for rule in step.get("route_on", []):
+            if rule["goto"] not in step_ids:
+                fail(
+                    f"Routing target '{rule['goto']}' does not exist "
+                    f"(from step '{step['step_id']}')"
+                )
+
+
 def chain_entry(argv: List[str]) -> None:
     if not argv:
         print_chain_help()
@@ -1091,6 +1597,8 @@ def chain_entry(argv: List[str]) -> None:
         "cancel-batch",
         "resume",
         "sweep-resume",
+        "build-parallel",
+        "build-steps",
     }:
 
         if sub == "help":
@@ -1104,6 +1612,94 @@ def chain_entry(argv: List[str]) -> None:
             name = argv[1]
             agents = argv[2:]
             chain_build(name, agents)
+            return
+
+        if sub == "build-parallel":
+            if len(argv) < 3:
+                print(
+                    "Usage: treehopper chain build-parallel <step_name> <agent1> <agent2> ..."
+                )
+                sys.exit(1)
+
+            step_name = argv[1]
+            agents = argv[2:]
+            chain_build_parallel(step_name, agents)
+            return
+
+        if sub == "build-steps":
+            """
+            Example:
+            th chain build-steps doc_intel \
+            --step extract sequential pdf_extractor \
+            --step analyze parallel content_analyzer keyword_extractor \
+            --step report sequential report_generator
+            """
+
+            if len(argv) < 3:
+                print(
+                    "Usage: th chain build-steps <chain_name> --step <id> <mode> <agents...>"
+                )
+                sys.exit(1)
+
+            chain_name = argv[1]
+            args = argv[2:]
+
+            steps = []
+            i = 0
+            while i < len(args):
+                if args[i] != "--step":
+                    print(f"❌ Unexpected token: {args[i]}")
+                    sys.exit(1)
+
+                if i + 3 >= len(args):
+                    print("❌ Invalid --step format")
+                    sys.exit(1)
+
+                step_id = args[i + 1]
+                mode = args[i + 2]
+                step_agents: List[Dict[str, Any]] = []
+
+                j = i + 3
+                merge_agent = None
+                route_on = None
+                while j < len(args) and args[j] != "--step":
+                    if args[j] == "--merge-agent":
+                        if j + 1 >= len(args):
+                            fail("--merge-agent requires an agent name")
+                        merge_agent = args[j + 1]
+                        j += 2
+                        continue
+
+                    if args[j] == "--route-on":
+                        if j + 1 >= len(args):
+                            fail("--route-on requires a JSON value")
+                        try:
+                            route_on = json.loads(args[j + 1])
+                        except Exception:
+                            fail("Invalid JSON passed to --route-on")
+                        j += 2
+                        continue
+
+                    step_agents.append({"agent_name": args[j]})
+                    j += 1
+
+                # --- Step Configuration Assembly ---
+                current_step_config = {
+                    "step_id": step_id,
+                    "execution_mode": mode,
+                    "agents": step_agents,
+                }
+
+                if merge_agent:
+                    current_step_config["merge_agent"] = merge_agent
+
+                if route_on:
+                    current_step_config["route_on"] = route_on
+
+                steps.append(current_step_config)
+                i = j
+
+            chain_build_multistep(chain_name, steps)
             return
 
         if sub == "run":
@@ -1208,10 +1804,11 @@ def chain_entry(argv: List[str]) -> None:
             return
 
         if sub == "delete":
-            if len(argv) != 2:
-                print("Usage: treehopper chain delete <name|id>")
+            if len(argv) < 2:
+                print("Usage: treehopper chain delete <name|id> [<name|id>...]")
                 sys.exit(1)
-            chain_delete(argv[1])
+            # Pass all arguments after 'delete' as a list to the new chain_delete function
+            chain_delete(argv[1:])
             return
 
         if sub == "logs":

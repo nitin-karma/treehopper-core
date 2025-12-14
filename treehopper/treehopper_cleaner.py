@@ -57,6 +57,7 @@ def main():
         print("   • cancellation.db")
         print("   • runtime PID files")
         print("   • runtime canceled files")
+        print("   • treehopper logs")
         print("🚫 subscription_id.txt will NOT be deleted")
         ans = input("Proceed? (y/N): ")
         if ans.lower() not in ("y", "yes"):

@@ -426,34 +426,70 @@ def list_agents() -> None:
     print(tabulate(table_data, headers=["AGENT EP", "GOAL", "TAGS"], tablefmt="grid"))
 
 
+def format_agents_for_table(agents_list: list[dict]) -> str:
+    """
+    Converts the structured agents list (List[Dict[mode, List[agent_name]]])
+    into a single string for table display.
+    """
+    display_parts = []
+
+    # Iterate through each step dictionary in the list
+    for step_dict in agents_list:
+        for mode, agent_names in step_dict.items():
+            if agent_names and isinstance(agent_names, list):
+                # Use the recommended separator: >>
+                step_display = f"{mode}: {', '.join(agent_names)}"
+                display_parts.append(step_display)
+            else:
+                display_parts.append(f"{mode}: (None)")
+
+    # --- CHANGE THIS LINE ---
+    # Join all steps with the new double arrow separator
+    return " >> ".join(display_parts)
+    # -----------------------
+
+
 def list_chains() -> None:
     ensure_server()
     r = requests.get(f"{BASE_URL}/api/v1/dev/chains", headers=API_KEY)
     r.raise_for_status()
     chains = r.json()
-    table_data = [
-        [
-            chain["chain_name"],
-            chain["endpoint"],
-            ", ".join(chain.get("agents", [])),
-            chain["created_at"],
-        ]
-        for chain in chains
-    ]
-    logger.info(
-        tabulate(
-            table_data,
-            headers=["CHAIN NAME", "ENDPOINT", "AGENTS", "CREATED AT"],
-            tablefmt="grid",
+
+    # Check if 'chains' is a list and not empty before processing
+    if not isinstance(chains, list) or not chains:
+        logger.info("No chains found.")
+        print("No chains found.")
+        return
+
+    table_data = []
+    for chain in chains:
+        # 1. Get the structured agents data (e.g., [{"SEQUENTIAL": [...]}, ...])
+        structured_agents = chain.get("agents", [])
+
+        # 2. Format it using the new helper function
+        formatted_agents = format_agents_for_table(structured_agents)
+
+        table_data.append(
+            [
+                chain["chain_name"],
+                chain["chain_type"],
+                chain["endpoint"],
+                # Use the formatted string for the table
+                formatted_agents,
+                chain["created_at"],
+            ]
         )
+
+    headers = ["CHAIN NAME", "TYPE", "ENDPOINT", "AGENTS", "CREATED AT"]
+
+    output = tabulate(
+        table_data,
+        headers=headers,
+        tablefmt="grid",
     )
-    print(
-        tabulate(
-            table_data,
-            headers=["CHAIN NAME", "ENDPOINT", "AGENTS", "CREATED AT"],
-            tablefmt="grid",
-        )
-    )
+
+    logger.info(output)
+    print(output)
 
 
 # ---------------------------------------------------------------------
@@ -1154,7 +1190,7 @@ def main() -> None:
     if cmd == "help":
         logger.info("help command")
         print_help()
-    elif cmd == "run":
+    elif cmd == "run" or cmd == "start":
         logger.info("run command")
         bg = "--bg" in sys.argv
         run(background=bg)
@@ -1227,7 +1263,7 @@ def main() -> None:
         # Call the agent
         call(args.path, json_data)
     elif cmd == "init":
-        logger.info("initialising command")
+        logger.info("initialising agent command")
         if len(sys.argv) != 3:
             print("❌ Usage: treehopper init <agent_name>")
             sys.exit(1)
