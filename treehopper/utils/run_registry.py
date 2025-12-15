@@ -4,6 +4,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import uuid
 
 from treehopper.th_config import (
     #     RUNTIME_DIR,
@@ -27,9 +28,22 @@ def _now_iso() -> str:
     return datetime.utcnow().isoformat() + "Z"
 
 
+# def make_run_id(chain_name: str) -> str:
+#     # public helper: time-based ID
+#     return f"{chain_name}-{int(time.time() * 1000)}"
 def make_run_id(chain_name: str) -> str:
-    # public helper: time-based ID
-    return f"{chain_name}-{int(time.time() * 1000)}"
+    """
+    Generate a globally unique run_id.
+
+    Format:
+      <chain_name>-<epoch_ms>-<short_uuid>
+
+    Example:
+      demo-1765805542341-a3f9c2
+    """
+    ts = int(time.time() * 1000)
+    suffix = uuid.uuid4().hex[:6]
+    return f"{chain_name}-{ts}-{suffix}"
 
 
 def _make_run_filename(run_id: str) -> str:

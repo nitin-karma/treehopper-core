@@ -98,10 +98,9 @@ EventType = Literal[
 ]
 
 
+# treehopper/websockets/schema_guard.py
+
 ALLOWED_EVENT_TYPES = {
-    "run_start",
-    "run_completed",
-    "run_cancelled",
     "step_start",
     "step_complete",
     "agent_start",
@@ -109,4 +108,18 @@ ALLOWED_EVENT_TYPES = {
     "parallel_complete",
     "merge_complete",
     "route_taken",
+    "run_completed",
+    "run_cancelled",
+}
+
+REQUIRED_FIELDS = {
+    "step_start": ["step_id"],
+    "step_complete": ["step_id"],
+    "agent_start": ["step_id", "agent"],
+    "agent_complete": ["step_id", "agent"],
+    "parallel_complete": ["step_id", "agents"],
+    "merge_complete": ["step_id", "merge_agent"],
+    "route_taken": ["from_step", "to_step"],
+    "run_completed": ["status"],
+    "run_cancelled": [],
 }

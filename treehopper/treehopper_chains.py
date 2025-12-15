@@ -1396,8 +1396,26 @@ def fail(message: str) -> NoReturn:
     sys.exit(1)
 
 
+def validate_chain_metadata(cfg: dict):
+    required = [
+        "chain_name",
+        "chain_id",
+        "subscription_id",
+        "endpoint",
+        "method",
+    ]
+
+    for key in required:
+        if key not in cfg:
+            raise ValueError(f"chain.yaml missing required field: '{key}'")
+
+
 # Chain validations
 def validate_chain_cfg(chain_cfg: dict):
+    validate_chain_metadata(chain_cfg)
+
+    if "steps" not in chain_cfg:
+        raise ValueError("chain.yaml must contain a 'steps' list")
     validate_limits(chain_cfg)
     validate_step_structure(chain_cfg)
     validate_agent_existence(chain_cfg)

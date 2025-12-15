@@ -1,26 +1,76 @@
 from collections import defaultdict, deque
 from typing import Dict, Set
+from pathlib import Path
+from datetime import datetime
+import json
+
 from fastapi import WebSocket
 from treehopper.websockets.schema_guard import validate_event
+from treehopper.th_config import TH_ROOT
 
 
 class WSManager:
     def __init__(self):
+        # Active connections
         self.run_connections: Dict[str, Set[WebSocket]] = defaultdict(set)
         self.chain_connections: Dict[str, Set[WebSocket]] = defaultdict(set)
 
-        # 🔁 Replay buffers
+        # 🔁 In-memory replay buffers (fast path)
         self.run_buffers = defaultdict(lambda: deque(maxlen=200))
         self.chain_buffers = defaultdict(lambda: deque(maxlen=200))
 
+    # ------------------------------------------------------------------
+    # 🔁 File-backed event storage (durable replay)
+    # ------------------------------------------------------------------
+
+    def _run_event_file(self, run_id: str) -> Path:
+        return TH_ROOT / "registry" / "chains" / "events" / f"{run_id}.events.jsonl"
+
+    def _record_event(self, run_id: str, event: dict):
+        """
+        Append event to per-run JSONL file.
+        """
+        p = self._run_event_file(run_id)
+        p.parent.mkdir(parents=True, exist_ok=True)
+
+        enriched = dict(event)
+        enriched["ts"] = datetime.utcnow().isoformat()
+
+        with p.open("a") as f:
+            f.write(json.dumps(enriched) + "\n")
+
+    async def _replay_from_file(
+        self, run_id: str, websocket: WebSocket, limit: int = 200
+    ):
+        """
+        Replay last N events from disk for late joiners.
+        """
+        p = self._run_event_file(run_id)
+        if not p.exists():
+            return
+
+        lines = p.read_text().splitlines()[-limit:]
+        for line in lines:
+            try:
+                await websocket.send_text(line)
+            except Exception:
+                break
+
+    # ------------------------------------------------------------------
+    # 🔌 Connection management
+    # ------------------------------------------------------------------
+
     async def connect_run(self, run_id: str, websocket: WebSocket):
+        # await websocket.accept()
         self.run_connections[run_id].add(websocket)
 
-        # 🔁 Replay
+        # 🔁 Replay (file first, then memory)
+        await self._replay_from_file(run_id, websocket)
         for evt in self.run_buffers[run_id]:
             await websocket.send_json(evt)
 
     async def connect_chain(self, chain_name: str, websocket: WebSocket):
+        # await websocket.accept()
         self.chain_connections[chain_name].add(websocket)
 
         for evt in self.chain_buffers[chain_name]:
@@ -30,9 +80,27 @@ class WSManager:
         pool = self.run_connections if scope == "run" else self.chain_connections
         pool[key].discard(websocket)
 
+    # ------------------------------------------------------------------
+    # 📡 Broadcast
+    # ------------------------------------------------------------------
+
     async def broadcast(self, run_id: str, chain_name: str, event: dict):
-        # --- Run scope ---
+        """
+        Broadcast event to:
+        - run-level subscribers
+        - chain-level subscribers
+        Also records event for replay.
+        """
         validate_event(event)
+
+        # -------------------------------
+        # Record (durable)
+        # -------------------------------
+        self._record_event(run_id, event)
+
+        # -------------------------------
+        # Run scope
+        # -------------------------------
         self.run_buffers[run_id].append(event)
         for ws in list(self.run_connections.get(run_id, [])):
             try:
@@ -40,7 +108,9 @@ class WSManager:
             except Exception:
                 self.run_connections[run_id].discard(ws)
 
-        # --- Chain scope ---
+        # -------------------------------
+        # Chain scope
+        # -------------------------------
         chain_event = {**event, "run_id": run_id}
         self.chain_buffers[chain_name].append(chain_event)
         for ws in list(self.chain_connections.get(chain_name, [])):
