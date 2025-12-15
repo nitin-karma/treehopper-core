@@ -23,6 +23,7 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi import Security
 from fastapi.security import APIKeyHeader
 from fastapi.openapi.utils import get_openapi
+from fastapi import WebSocket, WebSocketDisconnect
 
 # ======================================================================
 # 3. Local/Project Imports
@@ -37,7 +38,9 @@ from treehopper.treehopper_cancellation import (
     update_cancel_marker_with_runtime,
     create_cancel_marker,
     run_with_cancellation,
+    is_run_cancelled,
 )
+from treehopper.websockets.ws_manager import ws_manager
 
 # ======================================================================
 # EXECUTION AND CONFIGURATION START
@@ -236,6 +239,37 @@ async def verify_api_key(key: str = Security(API_KEY_HEADER)):
     if key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
     return key
+
+
+def _verify_ws_api_key(websocket: WebSocket):
+    api_key = websocket.query_params.get("api_key")
+    print(f"[_verify_ws_api_key] {api_key}")
+    if api_key != API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+
+
+@app.websocket("/api/v1/ws/run/{run_id}")
+async def ws_run_events(websocket: WebSocket, run_id: str):
+    _verify_ws_api_key(websocket)
+    await websocket.accept()
+    await ws_manager.connect_run(run_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await ws_manager.disconnect(run_id, websocket, scope="run")
+
+
+@app.websocket("/api/v1/ws/chain/{chain_name}")
+async def ws_chain_events(websocket: WebSocket, chain_name: str):
+    _verify_ws_api_key(websocket)
+    await websocket.accept()
+    await ws_manager.connect_chain(chain_name, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await ws_manager.disconnect(chain_name, websocket, scope="chain")
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -474,6 +508,20 @@ async def run_chain(
             merge_agent = step.get("merge_agent")
             routes = step.get("route_on", [])
 
+            await ws_manager.broadcast(
+                run_id=run_id,
+                chain_name=CHAIN_NAME,
+                event={
+                    "type": "step_start",
+                    "step_id": step_id,
+                    "step_index": step_index,
+                    "mode": mode,
+                },
+            )
+
+            # 👇 TEMPORARY DEMO DELAY
+            await asyncio.sleep(1)
+
             runtime_state[step_id] = {}
 
             run_registry_mod.record_chain_run(
@@ -495,6 +543,15 @@ async def run_chain(
 
             if mode == "sequential":
                 ag = agents[0]
+                await ws_manager.broadcast(
+                    run_id=run_id,
+                    chain_name=CHAIN_NAME,
+                    event={
+                        "type": "agent_start",
+                        "step_id": step_id,
+                        "agent": ag["agent_name"],
+                    },
+                )
                 params = {}
                 for inp in ag.get("inputs", []):
                     val = resolve_input(
@@ -517,13 +574,31 @@ async def run_chain(
                 namespaced.update(flatten_namespaced(step_id, ag["agent_name"], result))
 
                 step_output = result
-
+                await ws_manager.broadcast(
+                    run_id=run_id,
+                    chain_name=CHAIN_NAME,
+                    event={
+                        "type": "agent_complete",
+                        "step_id": step_id,
+                        "agent": ag["agent_name"],
+                    },
+                )
             # -------------------------
             # PARALLEL STEP
             # -------------------------
             else:
 
                 async def run_one(agent):
+                    await asyncio.sleep(0.5)
+                    await ws_manager.broadcast(
+                        run_id=run_id,
+                        chain_name=CHAIN_NAME,
+                        event={
+                            "type": "agent_start",
+                            "step_id": step_id,
+                            "agent": agent["agent_name"],
+                        },
+                    )
                     params = {}
                     for inp in agent.get("inputs", []):
                         params[inp["name"]] = resolve_input(
@@ -537,10 +612,27 @@ async def run_chain(
                         run_id,
                         step_index,
                     )
+                    await ws_manager.broadcast(
+                        run_id=run_id,
+                        chain_name=CHAIN_NAME,
+                        event={
+                            "type": "agent_complete",
+                            "step_id": step_id,
+                            "agent": agent["agent_name"],
+                        },
+                    )
                     return {"agent": agent["agent_name"], "output": out}
 
                 parallel_results = await asyncio.gather(*[run_one(a) for a in agents])
-
+                await ws_manager.broadcast(
+                    run_id=run_id,
+                    chain_name=CHAIN_NAME,
+                    event={
+                        "type": "parallel_complete",
+                        "step_id": step_id,
+                        "agents": [a["agent_name"] for a in agents],
+                    },
+                )
                 for item in parallel_results:
                     runtime_state[step_id][item["agent"]] = item["output"]
                     namespaced.update(
@@ -559,6 +651,16 @@ async def run_chain(
                     )
 
                 step_output = merge_fn(parallel_results)
+                await ws_manager.broadcast(
+                    run_id=run_id,
+                    chain_name=CHAIN_NAME,
+                    event={
+                        "type": "merge_complete",
+                        "step_id": step_id,
+                        "merge_agent": merge_key,
+                        "merged_keys": list(step_output.keys()),
+                    },
+                )
 
             # -------------------------
             # CONDITIONAL ROUTING
@@ -573,12 +675,34 @@ async def run_chain(
                             i for i, s in enumerate(steps) if s["step_id"] == target
                         )
                         jumped = True
+                        await ws_manager.broadcast(
+                            run_id=run_id,
+                            chain_name=CHAIN_NAME,
+                            event={
+                                "type": "route_taken",
+                                "from_step": step_id,
+                                "to_step": target,
+                                "condition": rule["if"],
+                            },
+                        )
                         break
                 except Exception:
                     pass
 
             if not jumped:
+                await ws_manager.broadcast(
+                    run_id=run_id,
+                    chain_name=CHAIN_NAME,
+                    event={"type": "step_complete", "step_id": step_id},
+                )
                 step_index += 1
+
+        if not await is_run_cancelled(run_id):
+            await ws_manager.broadcast(
+                run_id=run_id,
+                chain_name=CHAIN_NAME,
+                event={"type": "run_completed", "status": "success"},
+            )
 
         return run_registry_mod.record_chain_run(
             chain_name=CHAIN_NAME,
@@ -610,6 +734,9 @@ async def run_chain(
     # GLOBAL CANCEL RETURN
     # ---------------------------------------------------
     if isinstance(wrapped, dict) and wrapped.get("cancelled"):
+        await ws_manager.broadcast(
+            run_id=run_id, chain_name=CHAIN_NAME, event={"type": "run_cancelled"}
+        )
         run_registry_mod.record_chain_run(
             chain_name=CHAIN_NAME,
             chain_id=CHAIN_ID,

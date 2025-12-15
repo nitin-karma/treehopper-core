@@ -1,6 +1,7 @@
 # treehopper/th_config.py
 import os
 from pathlib import Path
+from typing import Literal
 
 # Resolve HOME
 HOME = Path.home()
@@ -77,3 +78,35 @@ BUILTIN_MERGE_AGENTS = {
 }
 
 BUILTIN_AGENTS = {"language_detector"}
+
+
+# =========================================================================
+# BUILTIN Event Types for websockets mainly used in detached chain runtime
+# =========================================================================
+
+EventType = Literal[
+    "run_start",
+    "run_completed",
+    "run_cancelled",
+    "step_start",
+    "step_complete",
+    "agent_start",
+    "agent_complete",
+    "parallel_complete",
+    "merge_complete",
+    "route_taken",
+]
+
+
+ALLOWED_EVENT_TYPES = {
+    "run_start",
+    "run_completed",
+    "run_cancelled",
+    "step_start",
+    "step_complete",
+    "agent_start",
+    "agent_complete",
+    "parallel_complete",
+    "merge_complete",
+    "route_taken",
+}
