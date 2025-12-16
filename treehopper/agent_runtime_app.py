@@ -54,7 +54,7 @@ async def custom_docs():
     return get_swagger_ui_html(
         openapi_url=app.openapi_url,
         title=app.title,
-        swagger_favicon_url="/static/treehopper_favicon.png",
+        swagger_favicon_url="/static/agent_runtime_logo.png",
     )
 
 

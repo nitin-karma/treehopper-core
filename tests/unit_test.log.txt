@@ -1,0 +1,41 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.10.19, pytest-9.0.1, pluggy-1.6.0 -- /Users/nitinkumarkarma/miniforge3/envs/thopperenv/bin/python3.10
+cachedir: .pytest_cache
+rootdir: /Users/nitinkumarkarma/Documents/treehopper-cfw/treehopper-core
+configfile: pyproject.toml
+plugins: anyio-4.11.0, asyncio-1.3.0
+asyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 30 items
+
+tests/unit/test_agent_yaml_validation.py::test_agent_yaml_missing_fields PASSED [  3%]
+tests/unit/test_agent_yaml_validation.py::test_agent_yaml_valid PASSED   [  6%]
+tests/unit/test_cancellation.py::test_cancellation_module_importable PASSED [ 10%]
+tests/unit/test_chain_yaml_validation.py::test_chain_valid_simple_format PASSED [ 13%]
+tests/unit/test_chain_yaml_validation.py::test_chain_missing_required_field PASSED [ 16%]
+tests/unit/test_chain_yaml_validation.py::test_chain_must_have_steps PASSED [ 20%]
+tests/unit/test_chain_yaml_validation.py::test_step_invalid_execution_mode PASSED [ 23%]
+tests/unit/test_chain_yaml_validation.py::test_chain_missing_merge_agent PASSED [ 26%]
+tests/unit/test_chain_yaml_validation.py::test_chain_invalid_route_on_structure PASSED [ 30%]
+tests/unit/test_unit_core.py::test_agent_decorator_registers_path PASSED [ 33%]
+tests/unit/test_unit_core.py::test_validate_agent_name_rules PASSED      [ 36%]
+tests/unit/test_unit_core.py::test_push_file_creates_shared_dir PASSED   [ 40%]
+tests/unit/test_unit_core.py::test_push_file_source_file_not_found_raises_system_exit PASSED [ 43%]
+tests/unit/test_unit_core.py::test_validate_chain_name PASSED            [ 46%]
+tests/unit/test_unit_core.py::test_derive_chain_port_stable_and_range PASSED [ 50%]
+tests/unit/test_unit_core.py::test_make_run_id_unique_and_prefixed PASSED [ 53%]
+tests/unit/test_unit_core.py::test_record_chain_run_writes_files PASSED  [ 56%]
+tests/unit/test_unit_core.py::test_registry_paths_created PASSED         [ 60%]
+tests/unit/test_unit_core.py::test_registry_index_paths PASSED           [ 63%]
+tests/unit/test_unit_core.py::test_ws_event_schema_valid[event0] PASSED  [ 66%]
+tests/unit/test_unit_core.py::test_ws_event_schema_valid[event1] PASSED  [ 70%]
+tests/unit/test_unit_core.py::test_ws_event_schema_valid[event2] PASSED  [ 73%]
+tests/unit/test_unit_core.py::test_ws_event_schema_valid[event3] PASSED  [ 76%]
+tests/unit/test_unit_core.py::test_ws_event_schema_valid[event4] PASSED  [ 80%]
+tests/unit/test_unit_core.py::test_ws_event_schema_valid[event5] PASSED  [ 83%]
+tests/unit/test_unit_core.py::test_ws_event_schema_valid[event6] PASSED  [ 86%]
+tests/unit/test_unit_core.py::test_ws_event_schema_invalid PASSED        [ 90%]
+tests/unit/test_unit_core.py::test_cancel_dir_is_writable PASSED         [ 93%]
+tests/unit/test_ws_replay.py::test_run_replay_buffer PASSED              [ 96%]
+tests/unit/test_ws_replay.py::test_chain_replay_buffer PASSED            [100%]
+
+======================= 30 passed, 13 warnings in 1.38s ========================

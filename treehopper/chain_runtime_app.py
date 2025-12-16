@@ -284,7 +284,7 @@ async def custom_docs():
         title=app.title,
         swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
         swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
-        favicon_url="/static/treehopper_favicon.ico",
+        favicon_url="/static/chain_runtime_logo.png",
     )
 
 

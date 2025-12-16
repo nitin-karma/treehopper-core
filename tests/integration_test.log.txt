@@ -1,0 +1,19 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.10.19, pytest-9.0.1, pluggy-1.6.0 -- /Users/nitinkumarkarma/miniforge3/envs/thopperenv/bin/python3.10
+cachedir: .pytest_cache
+rootdir: /Users/nitinkumarkarma/Documents/treehopper-cfw/treehopper-core
+configfile: pyproject.toml
+plugins: anyio-4.11.0, asyncio-1.3.0
+asyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 8 items
+
+tests/integration/test_cancel_resume_integration.py::test_reject_multi_step_from_main_server PASSED [ 12%]
+tests/integration/test_cancel_resume_integration.py::test_cancel_and_resume_flow_runtime_only PASSED [ 25%]
+tests/integration/test_chain_execution.py::test_simple_chain_run PASSED  [ 37%]
+tests/integration/test_detached_runtime.py::test_detached_chain_run PASSED [ 50%]
+tests/integration/test_main_server.py::test_health_endpoint PASSED       [ 62%]
+tests/integration/test_main_server.py::test_auth_rejected PASSED         [ 75%]
+tests/integration/test_main_server.py::test_list_agents_with_key PASSED  [ 87%]
+tests/integration/test_main_server.py::test_chain_list PASSED            [100%]
+
+======================== 8 passed, 9 warnings in 37.26s ========================
