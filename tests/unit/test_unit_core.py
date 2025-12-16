@@ -1,6 +1,9 @@
 # import os
 import json
 import pytest
+from unittest.mock import patch
+
+# import shutil
 
 # from pathlib import Path
 
@@ -13,7 +16,7 @@ from treehopper.treehopper_chains import (
     derive_chain_port,
 )
 from treehopper.utils.run_registry import make_run_id
-from treehopper.treehopper_cli import validate_agent_name
+from treehopper.treehopper_cli import validate_agent_name, push_file
 from treehopper.th_config import (
     REGISTRY_DIR,
     REGISTRY_AGENTS,
@@ -38,9 +41,19 @@ def isolate_fs(tmp_path, monkeypatch):
     - no ~/.treehopper writes
     - hermetic tests
     """
+    # --- CORE FIX: Patch REGISTRY_DIR in BOTH modules ---
+
+    # 1. Patch in th_config (for other modules/globals)
     monkeypatch.setattr(
         "treehopper.th_config.REGISTRY_DIR", tmp_path / "registry", raising=False
     )
+    # 2. Patch in treehopper_cli (where push_file resides and uses the import)
+    monkeypatch.setattr(
+        "treehopper.treehopper_cli.REGISTRY_DIR", tmp_path / "registry", raising=False
+    )
+
+    # Patch all other necessary paths in th_config (and treehopper_cli if they are
+    # also statically imported, but focusing on REGISTRY_DIR is usually enough)
     monkeypatch.setattr(
         "treehopper.th_config.REGISTRY_AGENTS",
         tmp_path / "registry/agents",
@@ -69,6 +82,22 @@ def isolate_fs(tmp_path, monkeypatch):
     yield
 
 
+# --- MOCK DATA FOR push_file TESTS ---
+
+AGENT_INDEX_MOCK = [
+    {
+        "agent_name": "pdf_extractor",
+        "agent_id": "pdf_extractor-a1b2c3d4",
+        "subscription_id": "sub-123",
+    },
+    {
+        "agent_name": "content_analyzer",
+        "agent_id": "content_analyzer-x9y8z7w6",
+        "subscription_id": "sub-123",
+    },
+]
+
+
 # --------------------------------------------------
 # AGENT DECORATOR & REGISTRY
 # --------------------------------------------------
@@ -94,6 +123,76 @@ def test_validate_agent_name_rules():
 
     with pytest.raises(ValueError):
         validate_agent_name("12bad")
+
+
+# Patch the external dependencies that push_file relies on.
+# We assume load_agents_index and ensure_registry_dirs are defined elsewhere,
+# but we patch them in the scope of treehopper.treehopper_cli (where push_file is imported).
+
+# --------------------------------------------------
+# AGENT FILE OPERATIONS (push_file)
+# --------------------------------------------------
+
+
+@patch("treehopper.treehopper_cli.ensure_registry_dirs")
+@patch("treehopper.treehopper_cli.load_agents_index", return_value=AGENT_INDEX_MOCK)
+@patch("shutil.copy2")  # <-- NEW PATCH: Mock the file copy operation
+def test_push_file_creates_shared_dir(
+    mock_copy, mock_load_index, mock_ensure_dirs, tmp_path
+):
+    """
+    Tests the success path: push_file should correctly construct and create
+    the shared storage directory for a valid agent_id AND validate the source file.
+    """
+    agent_name = "pdf_extractor"
+    expected_agent_id = "pdf_extractor-a1b2c3d4"
+
+    # 1. Create a mock source file in the temporary environment (REQUIRED for src.exists())
+    mock_src_file = tmp_path / "test_file_to_push.pdf"
+    mock_src_file.write_text("file content")
+    src_path = str(mock_src_file)
+
+    # Expected final path relies on isolate_fs mocking REGISTRY_DIR to tmp_path / "registry"
+    expected_dest_dir = tmp_path / "registry" / "shared" / expected_agent_id / "files"
+
+    # Ensure the parent registry path exists as per isolate_fs
+    (tmp_path / "registry").mkdir(exist_ok=True)
+
+    # Call the function
+    push_file(agent_name, src_path)
+
+    # Assertion 1: Check if the full expected directory path was created (This should now PASS)
+    assert expected_dest_dir.exists()
+    assert expected_dest_dir.is_dir()
+
+    # Assertion 2: Check that the copy operation was attempted (Verifying the end of the function logic)
+    # The destination should be the file inside the newly created directory
+    expected_copy_dest = expected_dest_dir / mock_src_file.name
+    mock_copy.assert_called_once_with(mock_src_file, expected_copy_dest)
+
+
+@patch("treehopper.treehopper_cli.ensure_registry_dirs")
+@patch("treehopper.treehopper_cli.load_agents_index", return_value=AGENT_INDEX_MOCK)
+def test_push_file_source_file_not_found_raises_system_exit(
+    mock_load_index, mock_ensure_dirs, capsys
+):
+    """
+    Tests the failure path when the source file does not exist.
+    """
+    agent_name = "pdf_extractor"
+    non_existent_src_path = "/nonexistent/path/to/file.pdf"
+
+    # Assert that sys.exit(1) is called
+    with pytest.raises(SystemExit) as excinfo:
+        push_file(agent_name, non_existent_src_path)
+
+    # Check the exit code
+    assert excinfo.value.code == 1
+
+    # Check the printed output for the user-facing message
+    captured = capsys.readouterr()
+    expected_message = f"❌ File not found: {non_existent_src_path}\n"
+    assert captured.out == expected_message
 
 
 # --------------------------------------------------
