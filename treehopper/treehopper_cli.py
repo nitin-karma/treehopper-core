@@ -24,6 +24,7 @@ from treehopper.chains_agents_refresh_status import (
     # agents_restart,
 )
 from treehopper.whatis import print_whatis
+from treehopper.th_ui_cli import launch_ui, stop_ui
 
 # ==============================================================================
 # GLOBAL OVERRIDE FOR DEVELOPMENT
@@ -1160,6 +1161,10 @@ Treehopper CLI Commands
   [treehopper | th] agent stop <name>                     Stop detached agent runtime
   [treehopper | th] agent delete <ref>                    Delete installed agent safely
 
+  UI Related CLI Commands
+  ==========================
+  [treehopper | th] launch ui [optional --port <port>]     To launch the visualizer for the Agents, Chains, etc
+  [treehopper | th] stop ui                                To stop the visualizer for the Agents, Chains, etc
 
   Chain Related CLI Commands
   ==========================
@@ -1194,6 +1199,10 @@ Treehopper CLI Commands
   [treehopper | th] agent stop <name>                     Stop detached agent runtime
   [treehopper | th] agent delete <ref>                    Delete installed agent safely
 
+  UI Related CLI Commands
+  ==========================
+  [treehopper | th] launch ui [optional --port <port>]     To launch the visualizer for the Agents, Chains, etc
+  [treehopper | th] stop ui                                To stop the visualizer for the Agents, Chains, etc
 
   Chain Related CLI Commands
   ==========================
@@ -1227,9 +1236,14 @@ def main() -> None:
         logger.info("run command")
         bg = "--bg" in sys.argv
         run(background=bg)
+
     elif cmd == "stop":
         logger.info("stop command")
-        stop()
+        if len(sys.argv) > 2 and sys.argv[2] == "ui":
+            stop_ui()
+        else:
+            stop()
+
     elif cmd == "restart":
         logger.info("restart command")
         restart()
@@ -1419,6 +1433,19 @@ def main() -> None:
         from .treehopper_cleaner import main as clean_main
 
         clean_main()
+    elif cmd == "launch":
+        if len(sys.argv) < 3:
+            print("Usage: treehopper launch ui")
+            sys.exit(1)
+
+        target = sys.argv[2].lower()
+
+        if target == "ui":
+            launch_ui()
+        else:
+            print(f"Unknown launch target: {target}")
+            sys.exit(1)
+
     else:
         logger.info(f"Unknown command: {cmd}")
         print(f"Unknown command: {cmd}")

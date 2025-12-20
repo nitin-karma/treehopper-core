@@ -163,3 +163,9 @@ ASCII_BANNER = r"""
                         TreehopperAI v{version}
             Think Globally. Compute Locally. Execute Intelligently.
 """
+
+
+# ==================
+# BUILTIN UI Tool
+# ==================
+DEFAULT_UI_PORT = 8090
