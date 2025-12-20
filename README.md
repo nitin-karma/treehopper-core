@@ -20,9 +20,9 @@
 
 **TreehopperAI** is a local-first, agent-centric, fully open-source automation framework for building intelligent workflows — from edge AI agents to orchestrated micro-services and distributed chains.
 
-### 🧭 What “Local-First” Means in Treehopper
+### 🧭 What “Local-First” Means in TreehopperAI
 
-Treehopper is local-first by design:
+TreehopperAI is local-first by design:
 
 - All runtimes, chains, agents, logs, and state execute locally by default
 - No cloud account is required to build or run workflows
