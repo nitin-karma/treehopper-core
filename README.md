@@ -336,6 +336,21 @@ This command:
 
 ---
 
+## Testing Strategy
+
+Treehopper uses a layered testing approach:
+
+- **Unit tests** (`pytest tests/unit`)
+- **Integration tests** (`pytest tests/integration`)
+- **Real E2E runtime smoke tests** (`scripts/e2e_smoke_treehopper_full.sh`)
+
+E2E tests are intentionally shell-based and run the system exactly
+as users do (CLI + detached runtimes). They are not written in pytest.
+
+This ensures high confidence without coupling tests to internal
+FastAPI or registry behavior.
+
+
 ## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> License
 
 **MIT License**

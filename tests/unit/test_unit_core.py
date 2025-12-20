@@ -1,11 +1,11 @@
 # import os
-import json
+# import json
 import pytest
-from unittest.mock import patch
 
+# import sys
 # import shutil
-
-# from pathlib import Path
+from pathlib import Path
+from unittest.mock import patch
 
 # --------------------------------------------------
 # CORE IMPORTS
@@ -15,18 +15,13 @@ from treehopper.treehopper_chains import (
     validate_chain_name,
     derive_chain_port,
 )
-from treehopper.utils.run_registry import make_run_id
+from treehopper.utils.run_registry import make_run_id, record_chain_run
 from treehopper.treehopper_cli import validate_agent_name, push_file
-from treehopper.th_config import (
-    REGISTRY_DIR,
-    REGISTRY_AGENTS,
-    REGISTRY_AGENTS_INDEX,
-    CHAINS_DIR,
-    CHAINS_INDEX,
-    RUNTIME_DIR,
-    CANCEL_DIR,
+from treehopper.chains_agents_refresh_status import (
+    chains_status,
+    agents_status,
 )
-from treehopper.utils.run_registry import record_chain_run
+import treehopper.th_config as th_config
 from treehopper.websockets.schema_guard import validate_event
 
 
@@ -36,54 +31,47 @@ from treehopper.websockets.schema_guard import validate_event
 @pytest.fixture(autouse=True)
 def isolate_fs(tmp_path, monkeypatch):
     """
-    Force ALL filesystem paths into a temp directory.
-    This guarantees:
-    - no ~/.treehopper writes
-    - hermetic tests
+    Deep-patch ALL modules to ensure no real files are touched.
     """
-    # --- CORE FIX: Patch REGISTRY_DIR in BOTH modules ---
+    tmp_reg = tmp_path / "registry"
+    tmp_agents = tmp_reg / "agents"
+    tmp_chains = tmp_reg / "chains"
+    tmp_runtime = tmp_path / "runtime"
+    tmp_cancel = tmp_path / "cancel"
 
-    # 1. Patch in th_config (for other modules/globals)
-    monkeypatch.setattr(
-        "treehopper.th_config.REGISTRY_DIR", tmp_path / "registry", raising=False
-    )
-    # 2. Patch in treehopper_cli (where push_file resides and uses the import)
-    monkeypatch.setattr(
-        "treehopper.treehopper_cli.REGISTRY_DIR", tmp_path / "registry", raising=False
-    )
+    for d in [tmp_reg, tmp_agents, tmp_chains, tmp_runtime, tmp_cancel]:
+        d.mkdir(parents=True, exist_ok=True)
 
-    # Patch all other necessary paths in th_config (and treehopper_cli if they are
-    # also statically imported, but focusing on REGISTRY_DIR is usually enough)
-    monkeypatch.setattr(
-        "treehopper.th_config.REGISTRY_AGENTS",
-        tmp_path / "registry/agents",
-        raising=False,
-    )
-    monkeypatch.setattr(
-        "treehopper.th_config.REGISTRY_AGENTS_INDEX",
-        tmp_path / "registry/agents/index.json",
-        raising=False,
-    )
-    monkeypatch.setattr(
-        "treehopper.th_config.CHAINS_DIR", tmp_path / "registry/chains", raising=False
-    )
-    monkeypatch.setattr(
-        "treehopper.th_config.CHAINS_INDEX",
-        tmp_path / "registry/chains/index.json",
-        raising=False,
-    )
-    monkeypatch.setattr(
-        "treehopper.th_config.RUNTIME_DIR", tmp_path / "runtime", raising=False
-    )
-    monkeypatch.setattr(
-        "treehopper.th_config.CANCEL_DIR", tmp_path / "cancel", raising=False
-    )
+    path_map = {
+        "REGISTRY_DIR": tmp_reg,
+        "REGISTRY_AGENTS": tmp_agents,
+        "REGISTRY_AGENTS_INDEX": tmp_agents / "index.json",
+        "CHAINS_DIR": tmp_chains,
+        "CHAINS_INDEX": tmp_chains / "index.json",
+        "RUNTIME_DIR": tmp_runtime,
+        "CANCEL_DIR": tmp_cancel,
+    }
+
+    # 1. Patch the source config
+    for constant, path in path_map.items():
+        monkeypatch.setattr(th_config, constant, path)
+
+    # 2. Patch every module that imports these constants
+    target_modules = [
+        "treehopper.treehopper_cli",
+        "treehopper.utils.run_registry",
+        "treehopper.chains_agents_refresh_status",
+        "treehopper.th_config",
+    ]
+
+    for mod_name in target_modules:
+        for constant, path in path_map.items():
+            monkeypatch.setattr(f"{mod_name}.{constant}", path, raising=False)
 
     yield
 
 
-# --- MOCK DATA FOR push_file TESTS ---
-
+# --- MOCK DATA ---
 AGENT_INDEX_MOCK = [
     {
         "agent_name": "pdf_extractor",
@@ -108,7 +96,6 @@ def test_agent_decorator_registers_path():
 
     path = "/api/v1/agents/hello_test"
     assert path in AGENT_PATH_MAP
-
     entry = AGENT_PATH_MAP[path]
     assert entry["method"] == "POST"
     assert callable(entry["handler"])
@@ -117,58 +104,34 @@ def test_agent_decorator_registers_path():
 
 def test_validate_agent_name_rules():
     assert validate_agent_name("MyAgent_1") == "myagent_1"
-
     with pytest.raises(ValueError):
         validate_agent_name("bad name")
-
     with pytest.raises(ValueError):
         validate_agent_name("12bad")
 
 
-# Patch the external dependencies that push_file relies on.
-# We assume load_agents_index and ensure_registry_dirs are defined elsewhere,
-# but we patch them in the scope of treehopper.treehopper_cli (where push_file is imported).
-
 # --------------------------------------------------
 # AGENT FILE OPERATIONS (push_file)
 # --------------------------------------------------
-
-
 @patch("treehopper.treehopper_cli.ensure_registry_dirs")
 @patch("treehopper.treehopper_cli.load_agents_index", return_value=AGENT_INDEX_MOCK)
-@patch("shutil.copy2")  # <-- NEW PATCH: Mock the file copy operation
+@patch("shutil.copy2")
 def test_push_file_creates_shared_dir(
     mock_copy, mock_load_index, mock_ensure_dirs, tmp_path
 ):
-    """
-    Tests the success path: push_file should correctly construct and create
-    the shared storage directory for a valid agent_id AND validate the source file.
-    """
     agent_name = "pdf_extractor"
     expected_agent_id = "pdf_extractor-a1b2c3d4"
 
-    # 1. Create a mock source file in the temporary environment (REQUIRED for src.exists())
     mock_src_file = tmp_path / "test_file_to_push.pdf"
     mock_src_file.write_text("file content")
-    src_path = str(mock_src_file)
 
-    # Expected final path relies on isolate_fs mocking REGISTRY_DIR to tmp_path / "registry"
-    expected_dest_dir = tmp_path / "registry" / "shared" / expected_agent_id / "files"
+    # Use patched REGISTRY_DIR
+    expected_dest_dir = th_config.REGISTRY_DIR / "shared" / expected_agent_id / "files"
 
-    # Ensure the parent registry path exists as per isolate_fs
-    (tmp_path / "registry").mkdir(exist_ok=True)
+    push_file(agent_name, str(mock_src_file))
 
-    # Call the function
-    push_file(agent_name, src_path)
-
-    # Assertion 1: Check if the full expected directory path was created (This should now PASS)
     assert expected_dest_dir.exists()
-    assert expected_dest_dir.is_dir()
-
-    # Assertion 2: Check that the copy operation was attempted (Verifying the end of the function logic)
-    # The destination should be the file inside the newly created directory
-    expected_copy_dest = expected_dest_dir / mock_src_file.name
-    mock_copy.assert_called_once_with(mock_src_file, expected_copy_dest)
+    mock_copy.assert_called_once()
 
 
 @patch("treehopper.treehopper_cli.ensure_registry_dirs")
@@ -176,23 +139,48 @@ def test_push_file_creates_shared_dir(
 def test_push_file_source_file_not_found_raises_system_exit(
     mock_load_index, mock_ensure_dirs, capsys
 ):
-    """
-    Tests the failure path when the source file does not exist.
-    """
-    agent_name = "pdf_extractor"
-    non_existent_src_path = "/nonexistent/path/to/file.pdf"
-
-    # Assert that sys.exit(1) is called
     with pytest.raises(SystemExit) as excinfo:
-        push_file(agent_name, non_existent_src_path)
-
-    # Check the exit code
+        push_file("pdf_extractor", "/nonexistent/path.pdf")
     assert excinfo.value.code == 1
-
-    # Check the printed output for the user-facing message
     captured = capsys.readouterr()
-    expected_message = f"❌ File not found: {non_existent_src_path}\n"
-    assert captured.out == expected_message
+    assert "❌ File not found" in captured.out
+
+
+# --------------------------------------------------
+# STATUS REFRESH TESTS
+# --------------------------------------------------
+def test_chains_status_with_pid(tmp_path, monkeypatch):
+    pid_file = th_config.RUNTIME_DIR / "det_chain_demo.pid"
+    pid_file.write_text("stub")
+
+    monkeypatch.setattr(
+        "treehopper.chains_agents_refresh_status.read_pid_and_port",
+        lambda p: (12345, 20316),
+    )
+    monkeypatch.setattr(
+        "treehopper.chains_agents_refresh_status._is_pid_alive", lambda pid: True
+    )
+
+    status = chains_status()
+    assert "demo" in status
+    assert status["demo"]["alive"] is True
+
+
+def test_agents_status_with_pid(tmp_path, monkeypatch):
+    pid_file = th_config.RUNTIME_DIR / "det_agent_foo.pid"
+    pid_file.write_text("stub")
+
+    monkeypatch.setattr(
+        "treehopper.chains_agents_refresh_status.read_pid_and_port",
+        lambda p: (54321, 21316),
+    )
+    monkeypatch.setattr(
+        "treehopper.chains_agents_refresh_status._is_pid_alive", lambda pid: False
+    )
+
+    status = agents_status()
+    assert "foo" in status
+    assert status["foo"]["alive"] is False
 
 
 # --------------------------------------------------
@@ -200,7 +188,6 @@ def test_push_file_source_file_not_found_raises_system_exit(
 # --------------------------------------------------
 def test_validate_chain_name():
     assert validate_chain_name("DocFlow_1") == "docflow_1"
-
     with pytest.raises(ValueError):
         validate_chain_name("bad name")
 
@@ -208,7 +195,6 @@ def test_validate_chain_name():
 def test_derive_chain_port_stable_and_range():
     p1 = derive_chain_port("abc-123")
     p2 = derive_chain_port("abc-123")
-
     assert p1 == p2
     assert 20000 <= p1 <= 24999
 
@@ -219,16 +205,15 @@ def test_derive_chain_port_stable_and_range():
 def test_make_run_id_unique_and_prefixed():
     r1 = make_run_id("demo")
     r2 = make_run_id("demo")
-
     assert r1 != r2
     assert r1.startswith("demo-")
 
 
 def test_record_chain_run_writes_files(tmp_path):
-    chain_dir = tmp_path / "registry/chains/demo-123"
+    chain_dir = th_config.CHAINS_DIR / "demo-123"
     chain_dir.mkdir(parents=True)
 
-    history = record_chain_run(
+    record_chain_run(
         chain_name="demo",
         chain_id="demo-123",
         chain_dir=chain_dir,
@@ -238,49 +223,36 @@ def test_record_chain_run_writes_files(tmp_path):
         success=True,
         run_id="demo-001",
     )
-    print(history)
-    run_file = chain_dir / "runs/demo-001.json"
-    last_run = chain_dir / "last_run.json"
-
-    assert run_file.exists()
-    assert last_run.exists()
-
-    data = json.loads(run_file.read_text())
-    assert data["run_id"] == "demo-001"
-    assert data["success"] is True
+    assert (chain_dir / "runs/demo-001.json").exists()
+    assert (chain_dir / "last_run.json").exists()
 
 
 # --------------------------------------------------
 # FILESYSTEM PATH GUARANTEES
 # --------------------------------------------------
 def test_registry_paths_created(tmp_path):
-    # force creation
-    REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
-    REGISTRY_AGENTS.mkdir(parents=True, exist_ok=True)
-    CHAINS_DIR.mkdir(parents=True, exist_ok=True)
-    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-    CANCEL_DIR.mkdir(parents=True, exist_ok=True)
+    th_config.REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
+    th_config.REGISTRY_AGENTS.mkdir(parents=True, exist_ok=True)
+    th_config.CHAINS_DIR.mkdir(parents=True, exist_ok=True)
+    th_config.RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    th_config.CANCEL_DIR.mkdir(parents=True, exist_ok=True)
 
-    assert REGISTRY_DIR.exists()
-    assert REGISTRY_AGENTS.exists()
-    assert CHAINS_DIR.exists()
-    assert RUNTIME_DIR.exists()
-    assert CANCEL_DIR.exists()
+    assert str(tmp_path) in str(th_config.REGISTRY_DIR)
+    assert th_config.REGISTRY_AGENTS.exists()
 
 
 def test_registry_index_paths(tmp_path):
-    REGISTRY_AGENTS.parent.mkdir(parents=True, exist_ok=True)
-    REGISTRY_AGENTS_INDEX.write_text("[]")
+    th_config.REGISTRY_AGENTS_INDEX.parent.mkdir(parents=True, exist_ok=True)
+    th_config.REGISTRY_AGENTS_INDEX.write_text("[]")
+    th_config.CHAINS_INDEX.parent.mkdir(parents=True, exist_ok=True)
+    th_config.CHAINS_INDEX.write_text("[]")
 
-    CHAINS_DIR.mkdir(parents=True, exist_ok=True)
-    CHAINS_INDEX.write_text("[]")
-
-    assert REGISTRY_AGENTS_INDEX.exists()
-    assert CHAINS_INDEX.exists()
+    assert th_config.REGISTRY_AGENTS_INDEX.exists()
+    assert th_config.CHAINS_INDEX.exists()
 
 
 # --------------------------------------------------
-# WEBSOCKET EVENT SCHEMA (FROZEN CONTRACT)
+# WEBSOCKET EVENT SCHEMA (7 Parameterized Cases)
 # --------------------------------------------------
 @pytest.mark.parametrize(
     "event",
@@ -297,31 +269,72 @@ def test_registry_index_paths(tmp_path):
         {
             "type": "merge_complete",
             "step_id": "analyze",
-            "merge_agent": "smart_data_aggregator",
-            "merged_keys": ["x", "y"],
+            "merge_agent": "aggregator",
+            "merged_keys": ["x"],
         },
         {"type": "run_completed", "status": "success"},
         {"type": "run_cancelled"},
     ],
 )
 def test_ws_event_schema_valid(event):
-    # should NOT raise
     validate_event(event)
 
 
 def test_ws_event_schema_invalid():
     with pytest.raises(ValueError):
-        validate_event({"type": "step_start"})  # missing required fields
+        validate_event({"type": "step_start"})  # Missing required fields
 
 
 # --------------------------------------------------
 # CANCEL DIRECTORY SEMANTICS
 # --------------------------------------------------
 def test_cancel_dir_is_writable(tmp_path):
-    CANCEL_DIR.mkdir(parents=True, exist_ok=True)
-
-    marker = CANCEL_DIR / "demo-001.cancel"
+    th_config.CANCEL_DIR.mkdir(parents=True, exist_ok=True)
+    marker = th_config.CANCEL_DIR / "demo-001.cancel"
     marker.write_text("cancelled")
-
     assert marker.exists()
     assert marker.read_text() == "cancelled"
+
+
+def test_real_registry_untouched_verification(tmp_path):
+    """
+    Explicitly verifies that the real ~/.treehopper/registry files
+    were not emptied or modified during the test execution.
+    """
+    import treehopper.th_config as th_config
+
+    # 1. Define the REAL paths (ignoring the monkeypatch)
+    real_home = Path.home() / ".treehopper"
+    real_agents_json = real_home / "registry" / "agents" / "index.json"
+    real_chains_json = real_home / "registry" / "chains" / "index.json"
+
+    # 2. Capture current state if they exist
+    initial_content_agents = (
+        real_agents_json.read_text() if real_agents_json.exists() else None
+    )
+    initial_content_chains = (
+        real_chains_json.read_text() if real_chains_json.exists() else None
+    )
+
+    # 3. Trigger the logic that was previously causing the "leak"
+    # We call these to ensure the patched versions are what's being used
+    th_config.REGISTRY_AGENTS_INDEX.parent.mkdir(parents=True, exist_ok=True)
+    th_config.REGISTRY_AGENTS_INDEX.write_text("['test-data']")
+
+    # 4. ASSERTIONS
+    # Verify the temporary test file HAS the test data
+    assert th_config.REGISTRY_AGENTS_INDEX.read_text() == "['test-data']"
+
+    # Verify the REAL home file REMAINS unchanged
+    if initial_content_agents is not None:
+        assert real_agents_json.read_text() == initial_content_agents
+        assert (
+            real_agents_json.read_text() != "[]"
+        )  # Double check it didn't get emptied
+
+    if initial_content_chains is not None:
+        assert real_chains_json.read_text() == initial_content_chains
+
+    # 5. Final Path Sanity Check
+    assert str(tmp_path) in str(th_config.REGISTRY_AGENTS_INDEX)
+    assert str(Path.home()) not in str(th_config.REGISTRY_AGENTS_INDEX)

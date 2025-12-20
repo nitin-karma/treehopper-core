@@ -1,9 +1,16 @@
+import os
 import subprocess
 import pytest
 from subprocess import CalledProcessError, STDOUT
 
 
-def test_detached_chain_run(auth_headers):
+def test_detached_chain_run(isolated_treehopper_root, auth_headers):
+    env = os.environ.copy()
+    env["TH_ROOT"] = str(isolated_treehopper_root)
+    env["TREEHOPPER_RUNTIME_DIR"] = str(isolated_treehopper_root / "runtime")
+    env["TREEHOPPER_CANCEL_DIR"] = str(isolated_treehopper_root / "runtime" / "cancels")
+    env["TREEHOPPER_FORCE_LOCAL"] = "1"
+    env["TREEHOPPER_RUNTIME_MODE"] = "1"
     cmd = [
         "th",
         "chain",
@@ -17,7 +24,7 @@ def test_detached_chain_run(auth_headers):
 
     try:
         # Use stderr=STDOUT to capture all output (stdout + stderr) in the result variable
-        result = subprocess.check_output(cmd, text=True, stderr=STDOUT)
+        result = subprocess.check_output(cmd, text=True, stderr=STDOUT, env=env)
 
         # --- PRIMARY SUCCESS CHECK ---
         run_id = None

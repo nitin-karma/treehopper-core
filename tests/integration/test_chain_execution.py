@@ -1,21 +1,20 @@
+# tests/integration/test_chain_execution.py
+
 import pytest
-
-# from starlette.testclient import TestClient  # Assuming 'client' fixture provides this
-
-# from typing import Any  # Just for type hints if needed elsewhere
-
-# Define a custom exception class if your code uses one, or use the base Exception
-# For now, we will assume the agent raises the base Exception class.
 
 
 def test_simple_chain_run(client, auth_headers):
     payload = {"file_path": "shared/pdf_extractor-a1b2c3d4/files/contract.pdf"}
     rate_limit_indicator = "429 Too Many Requests"
 
+    endpoint = "/api/v1/chains/doc_flow/"
+
+    print(client.get(endpoint + "health", headers=auth_headers).text)
+
     # --- Try to execute the POST request ---
     try:
         r = client.post(
-            "/api/v1/chains/doc_flow/run",
+            endpoint + "run",
             headers=auth_headers,
             json=payload,
         )

@@ -1,3 +1,4 @@
+# treehopper/treehopper_cli.py
 import os
 import sys
 import argparse
@@ -14,7 +15,15 @@ from treehopper.th_config import (
     RUNTIME_DIR,
     MAIN_PID_FILE,
     CHAIN_PID_PREFIX,
+    ensure_dirs,
 )
+from treehopper.chains_agents_refresh_status import (
+    chains_status,
+    # chains_restart,
+    agents_status,
+    # agents_restart,
+)
+from treehopper.whatis import print_whatis
 
 # ==============================================================================
 # GLOBAL OVERRIDE FOR DEVELOPMENT
@@ -256,6 +265,10 @@ def run(
         print(f"sys-executable path - {sys.executable}")
         print(f"📌 PID: {proc.pid}")
         print(f"📝 Logs: {LOG_FILE}")
+        print("🟢 Treehopper server is RUNNING")
+        print("URL: http://localhost:1567")
+        logger.info("🟢 Treehopper server is RUNNING")
+        logger.info("URL: http://localhost:1567")
         logger.info(f"sys-executable path - {sys.executable}")
         logger.info(f"📌 PID: {proc.pid}")
         logger.info(f"📝 Logs: {LOG_FILE}")
@@ -343,6 +356,16 @@ def status():
 
 
 def ensure_server() -> None:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    # 🚨 TEST MODE GUARD
+    if os.getenv("TREEHOPPER_RUNTIME_MODE") == "1":
+        print("Test Mode Enabled - Returning")
+        logger.info("Test Mode Enabled - Returning")
+        return
+    print("Main Run Mode Enabled - continuing")
+    logger.info("Main Run Mode Enabled - continuing")
     try:
         if (
             requests.get(f"{BASE_URL}/api/v1/sys/health", timeout=0.3).status_code
@@ -1088,6 +1111,7 @@ def agent_stop(ref: str) -> None:
     print(f"This will stop detached agent '{meta['agent_name']}'")
     agent_id = meta["agent_id"]
     pid_file = RUNTIME_DIR / f"{AGENT_RUNTIME_PREFIX}{agent_id}.pid"
+    print(pid_file)
     pid = read_pid(pid_file)
 
     if not pid:
@@ -1116,8 +1140,8 @@ Treehopper CLI Commands
   Main Server/Process commands
   ============================
   [treehopper | th] status                                Show if the main server is running
-  [treehopper | th] run                                   Start the main server
-  [treehopper | th] run --bg                              Start the main server in background
+  [treehopper | th] start                                 Start the main server
+  [treehopper | th] start --bg                            Start the main server in background
   [treehopper | th] stop                                  Stop the main server
   [treehopper | th] restart                               Restart main server
   [treehopper | th] list_agents                           List installed agents
@@ -1132,7 +1156,8 @@ Treehopper CLI Commands
   [treehopper | th] lint <agent_folder>                   Validate handler.py + YAML
   [treehopper | th] build <agent_folder>                  Install agent to registry and run with main server
   [treehopper | th] agent info <ref>                      Show metadata
-  [treehopper | th] agent run <name> --detached           Start dedicated agent runtime in background
+  [treehopper | th] agent start <name> --detached         Start dedicated agent runtime in background
+  [treehopper | th] agent stop <name>                     Stop detached agent runtime
   [treehopper | th] agent delete <ref>                    Delete installed agent safely
 
 
@@ -1149,8 +1174,8 @@ Treehopper CLI Commands
   Main Server/Process commands
   ============================
   [treehopper | th] status                                Show if the main server is running
-  [treehopper | th] run                                   Start the main server
-  [treehopper | th] run --bg                              Start the main server in background
+  [treehopper | th] start                                 Start the main server
+  [treehopper | th] start --bg                            Start the main server in background
   [treehopper | th] stop                                  Stop the main server
   [treehopper | th] restart                               Restart main server
   [treehopper | th] list_agents                           List installed agents
@@ -1165,7 +1190,8 @@ Treehopper CLI Commands
   [treehopper | th] lint <agent_folder>                   Validate handler.py + YAML
   [treehopper | th] build <agent_folder>                  Install agent to registry and run with main server
   [treehopper | th] agent info <ref>                      Show metadata
-  [treehopper | th] agent run <name> --detached           Start dedicated agent runtime in background
+  [treehopper | th] agent start <name> --detached         Start dedicated agent runtime in background
+  [treehopper | th] agent stop <name>                     Stop detached agent runtime
   [treehopper | th] agent delete <ref>                    Delete installed agent safely
 
 
@@ -1180,6 +1206,13 @@ Treehopper CLI Commands
 # MAIN
 # ---------------------------------------------------------------------
 def main() -> None:
+    ensure_dirs()
+    if len(sys.argv) == 1:
+        print_whatis()
+        return
+    if sys.argv[1] in ("whatis", "about"):
+        print_whatis()
+        return
     logger.info("Starting treehopper")
     if len(sys.argv) < 2:
         print_help()
@@ -1275,6 +1308,36 @@ def main() -> None:
     elif cmd == "build":
         logger.info("build command")
         build_agent(sys.argv[2])
+    elif cmd == "chains" or cmd == "agents":
+        logger.info(f"{cmd} command handler")
+
+        # Check for minimum arguments: th <command> <action>
+        if len(sys.argv) < 3:
+            print(f"❌ Usage: treehopper {cmd} <action> [arg]")
+            sys.exit(1)
+
+        sub = cmd  # This is the top-level command, e.g., "chains" or "agents"
+        action = sys.argv[2].lower()
+        arg = sys.argv[3] if len(sys.argv) > 3 else None
+        print(f"Args - {arg}")
+        # This resolves the F821 errors for 'sub', 'action', and 'arg'
+        if sub == "chains":
+            if action == "status":
+                chains_status()
+            # elif action == "restart":
+            #     chains_restart(arg if arg != "--all" else None)
+            else:
+                print(f"Unknown chains subcommand: {action}")
+                sys.exit(1)
+
+        elif sub == "agents":
+            if action == "status":
+                agents_status()
+            # elif action == "restart":
+            #     agents_restart(arg if arg != "--all" else None)
+            else:
+                print(f"Unknown agents subcommand: {action}")
+                sys.exit(1)
     elif cmd == "chain" and len(sys.argv) > 2 and sys.argv[2] == "stop":
         logger.info("chain with stop command")
         stop_chain()
@@ -1289,11 +1352,11 @@ def main() -> None:
     elif cmd == "agent":
         logger.info("agent command")
         sub = sys.argv[2]
-        if sub == "run" and "--detached" in sys.argv:
-            logger.info("agent run detatched command")
+        if sub == "start" and "--detached" in sys.argv:
+            logger.info("agent start detatched command")
             if len(sys.argv) < 4:
                 print(
-                    "Usage: treehopper agent run <name> --detached "
+                    "Usage: treehopper agent start <name> --detached "
                     "[--port <port>] [--bg]"
                 )
                 sys.exit(1)

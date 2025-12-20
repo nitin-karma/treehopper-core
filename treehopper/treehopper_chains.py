@@ -49,6 +49,8 @@ from treehopper.th_config import (
     DEFAULT_MAX_PARALLEL_PER_STEP,
     BUILTIN_MERGE_AGENTS,
     BUILTIN_AGENTS,
+    DEFAULT_API_KEY,
+    ensure_dirs,
 )
 
 from treehopper.logging import get_logger
@@ -239,6 +241,16 @@ def ensure_main_server() -> None:
     """
     Simple health check + lazy start for the MAIN server on MAIN_PORT.
     """
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    # 🚨 TEST MODE GUARD
+    if os.getenv("TREEHOPPER_RUNTIME_MODE") == "1":
+        print("Test Mode Enabled - Returning")
+        logger.info("Test Mode Enabled - Returning")
+        return
+    print("Chain Run Mode Enabled - continuing")
+    logger.info("Chain Run Mode Enabled - continuing")
     try:
         r = requests.get(f"{BASE_URL}/api/v1/sys/health", timeout=0.3)
         if r.status_code == 200:
@@ -446,6 +458,59 @@ def parse_payload_args(args: List[str]) -> Dict[str, Any]:
     return {"args": remaining, "payload": payload or {}}
 
 
+def chain_start(chain_ref: ChainRef, port_override: int | None = None) -> None:
+    """
+    Start chain runtime ONLY.
+    No execution, no run_id, no registry writes.
+    """
+    ensure_main_server()
+
+    pid_file = RUNTIME_DIR / f"{CHAIN_PID_PREFIX}{chain_ref.chain_id}.pid"
+
+    existing_pid, existing_port = read_pid_and_port(pid_file)
+    if existing_pid:
+        try:
+            os.kill(existing_pid, 0)
+            print(f"🟢 Chain runtime already running on port {existing_port}")
+            return
+        except OSError:
+            pid_file.unlink(missing_ok=True)
+
+    actual_port = port_override or derive_chain_port(chain_ref.chain_id)
+
+    env = os.environ.copy()
+    env["CHAIN_NAME"] = chain_ref.chain_name
+    env["CHAIN_ID"] = chain_ref.chain_id
+    env["CHAIN_DIR"] = str(chain_ref.dir_path)
+    env["TREEHOPPER_TH_ROOT"] = str(TH_ROOT.resolve())
+    # env["TREEHOPPER_HOME"] = str(TH_ROOT.resolve())
+    env["TREEHOPPER_RUNTIME_DIR"] = str(RUNTIME_DIR.resolve())
+    env["TREEHOPPER_CANCEL_DIR"] = str(CANCEL_DIR.resolve())
+    env["PROD"] = "1"
+    env["UVICORN_WORKERS"] = "1"
+
+    LOG_FILE = RUNTIME_DIR / f"chain_{chain_ref.chain_name}-{chain_ref.chain_id}.log"
+
+    proc = subprocess.Popen(
+        [
+            "uvicorn",
+            "treehopper.chain_runtime_app:app",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            str(actual_port),
+        ],
+        env=env,
+        stdout=open(LOG_FILE, "w"),
+        stderr=subprocess.STDOUT,
+    )
+
+    write_pid(pid_file, proc.pid, actual_port)
+
+    print(f"🚀 Chain runtime started for {chain_ref.chain_name}")
+    print(f"📡 Listening on http://localhost:{actual_port}")
+
+
 def chain_run_local(chain_ref: ChainRef, payload: Dict[str, Any]) -> None:
     """
     Execute the chain via the main Treehopper server's
@@ -511,8 +576,11 @@ def chain_run_detached(
     chain_ref: ChainRef,
     payload: Dict[str, Any],
     port_override: int | None = None,
-    run_once: bool = True,
 ) -> None:
+    """
+    Execute a chain run against a detached runtime.
+    Starts runtime ONLY if not already running.
+    """
 
     ensure_main_server()
 
@@ -521,62 +589,38 @@ def chain_run_detached(
 
     pid_file = RUNTIME_DIR / f"{CHAIN_PID_PREFIX}{chain_ref.chain_id}.pid"
 
-    # Prefer existing runtime port if available
+    # ------------------------------------------------------------
+    # Resolve runtime port (prefer existing runtime)
+    # ------------------------------------------------------------
     existing_pid, existing_port = read_pid_and_port(pid_file)
-    if existing_pid and existing_port:
-        actual_port = existing_port
-    else:
-        actual_port = port_override or derive_chain_port(chain_ref.chain_id)
-
-    # ----------------------------------------------------------------------
-    # ALWAYS GENERATE RUN_ID HERE — SINGLE SOURCE OF TRUTH
-    # ----------------------------------------------------------------------
-    run_id = run_registry_mod.make_run_id(chain_ref.chain_name)
-    batch_id = None  # batch mode not used in direct detached run
-
-    # ----------------------------------------------------------------------
-    # Early checkpoint (pending)
-    # ----------------------------------------------------------------------
-    run_registry_mod.record_chain_run(
-        chain_name=chain_ref.chain_name,
-        chain_id=chain_ref.chain_id,
-        chain_dir=chain_ref.dir_path,
-        payload=payload,
-        results=[],
-        detached=True,
-        success=False,
-        run_id=run_id,
-        cancelled=False,
-        status="pending",
-        current_step_index=-1,
+    actual_port = (
+        existing_port or port_override or derive_chain_port(chain_ref.chain_id)
     )
 
-    # ----------------------------------------------------------------------
-    # START RUNTIME IF NOT ALIVE
-    # ----------------------------------------------------------------------
-    existing_pid, existing_port = read_pid_and_port(pid_file)
+    runtime_spawned = False
+
+    # ------------------------------------------------------------
+    # Start runtime ONLY if not alive
+    # ------------------------------------------------------------
     if existing_pid:
         try:
             os.kill(existing_pid, 0)
-            actual_port = existing_port or actual_port
         except OSError:
-            print("Process is not alive")
+            pid_file.unlink(missing_ok=True)
             existing_pid = None
 
     if not existing_pid:
+        runtime_spawned = True
+        print(f"Runtime Spawned - {runtime_spawned}")
+
         LOG_FILE = (
             RUNTIME_DIR / f"chain_{chain_ref.chain_name}-{chain_ref.chain_id}.log"
         )
 
-        # ======================================================================
-        # 🔥 CRITICAL PATCH — Inject absolute, unified FS paths into runtime
-        # ======================================================================
         env = os.environ.copy()
 
-        # ------------------------------------------------------------------
-        # ⭐ CLEAN FIX: Forward ONLY essential LLM environment variables
-        # ------------------------------------------------------------------
-        LLM_ENV_KEYS = [
+        # --- forward only safe runtime env ---
+        for k in [
             "TH_LLM_PROVIDER",
             "TH_TEST_MODE",
             "OPENAI_API_KEY",
@@ -586,53 +630,35 @@ def chain_run_detached(
             "TH_PERPLEXITY_MODEL",
             "TH_GEMINI_MODEL",
             "TH_OPENAI_TEMPERATURE",
-        ]
+        ]:
+            value = os.getenv(k)
+            if value is not None:
+                env[k] = value
 
-        for key in LLM_ENV_KEYS:
-            value = os.getenv(key)
-            if value:
-                env[key] = value
-        # ------------------------------------------------------------------
-        env["CHAIN_NAME"] = chain_ref.chain_name
-        env["CHAIN_ID"] = chain_ref.chain_id
-        env["CHAIN_DIR"] = str(chain_ref.dir_path)
-        # 🔥 ADD THESE LINES:
-        # from treehopper.treehopper_cancellation import DB_PATH
-        # env["TREEHOPPER_DB_PATH"] = str(DB_PATH.resolve())  # ← Force same DB
+        env.update(
+            {
+                "CHAIN_NAME": chain_ref.chain_name,
+                "CHAIN_ID": chain_ref.chain_id,
+                "CHAIN_DIR": str(chain_ref.dir_path),
+                "TREEHOPPER_TH_ROOT": str(TH_ROOT.resolve()),
+                # "TREEHOPPER_HOME": str(TH_ROOT.resolve()),
+                "TREEHOPPER_RUNTIME_DIR": str(RUNTIME_DIR.resolve()),
+                "TREEHOPPER_CANCEL_DIR": str(CANCEL_DIR.resolve()),
+                "PROD": "1",
+                "PYTHONUNBUFFERED": "1",
+                "UVICORN_WORKERS": "1",
+            }
+        )
 
-        env["PROD"] = "1"
-
-        # Absolute paths — the FIX for cancellation detection
-        env["TREEHOPPER_TH_ROOT"] = str(TH_ROOT.resolve())
-        env["TREEHOPPER_RUNTIME_DIR"] = str(RUNTIME_DIR.resolve())
-        env["TREEHOPPER_CANCEL_DIR"] = str(CANCEL_DIR.resolve())
-
-        # Uvicorn & Python safety
-        env["PYTHONUNBUFFERED"] = "1"  # real-time logs
-        env["UVICORN_WORKERS"] = "1"  # avoid forked workers (breaks FS sync)
-
-        # ----------------------------------------------------------------------
-        # DEV: inject local source into PYTHONPATH for subprocesses (guarded)
-        # ----------------------------------------------------------------------
-        # This is opt-in: set TREEHOPPER_DEV_MODE=1 in your shell / CI env to enable.
+        # Optional dev injection
         try:
-            # mark dev-mode for the child process (only when you explicitly opt in)
             if os.getenv("TREEHOPPER_DEV_MODE") == "1":
-                env["TREEHOPPER_DEV_MODE"] = "1"
-            # import helper if present
-            from treehopper.environment import inject_pythonpath
+                from treehopper.environment import inject_pythonpath
 
-            # only run injection when dev flag present in environment or parent process
-            if env.get("TREEHOPPER_DEV_MODE") == "1":
                 inject_pythonpath(env)
         except Exception:
-            # Don't break if the helper isn't available — fallback to default behavior.
             pass
-        # ----------------------------------------------------------------------
 
-        # ======================================================================
-        # Launch chain runtime
-        # ======================================================================
         proc = subprocess.Popen(
             [
                 "uvicorn",
@@ -649,51 +675,243 @@ def chain_run_detached(
 
         write_pid(pid_file, proc.pid, actual_port)
 
-        # Wait for runtime health
+        # wait for runtime health
         for _ in range(40):
             try:
                 r = requests.get(
-                    f"http://localhost:{actual_port}/api/v1/{chain_ref.chain_name}/health"
+                    f"http://localhost:{actual_port}/api/v1/{chain_ref.chain_name}/health",
+                    timeout=0.3,
                 )
                 if r.status_code == 200:
                     break
-            except requests.RequestException:
+            except Exception:
                 pass
             time.sleep(0.25)
 
-    # ----------------------------------------------------------------------
-    # POST request to runtime with forwarded run_id
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------
+    # Generate run_id (single source of truth)
+    # ------------------------------------------------------------
+    run_id = run_registry_mod.make_run_id(chain_ref.chain_name)
+
+    run_registry_mod.record_chain_run(
+        chain_name=chain_ref.chain_name,
+        chain_id=chain_ref.chain_id,
+        chain_dir=chain_ref.dir_path,
+        payload=payload,
+        results=[],
+        detached=True,
+        success=False,
+        run_id=run_id,
+        cancelled=False,
+        status="pending",
+        current_step_index=-1,
+    )
+
+    # ------------------------------------------------------------
+    # Fire-and-forget POST to runtime
+    # ------------------------------------------------------------
     url = f"http://localhost:{actual_port}/api/v1/{chain_ref.chain_name}/run"
 
     headers = {
-        "x-api-key": "demo-key-123",
+        "x-api-key": DEFAULT_API_KEY,
         "X-Treehopper-Run-Id": run_id,
     }
-    if batch_id:
-        headers["X-Treehopper-Batch-Id"] = batch_id
 
-    # ----------------------------------------------------------------------
-    # 🔥 Minimal Patch:
-    #   Fire-and-forget JSON POST using curl in a background subprocess.
-    #   CLI returns immediately, chain runtime logs progress independently.
-    #   No blocking → cancellation polling becomes correct.
-    # ----------------------------------------------------------------------
-    _post_runtime_detached(
-        url=url, payload=payload or {}, headers=headers  # ← dict, NOT json.dumps
-    )
+    _post_runtime_detached(url=url, payload=payload or {}, headers=headers)
 
     print(f"🚀 Detached chain triggered → run_id={run_id}")
-    print(f"📡 Runtime executing independently at http://localhost:{actual_port}")
-    print(f"📁 Track status via JSON at: {chain_ref.dir_path}/runs/{run_id}.json")
-
+    print(f"📡 Runtime: http://localhost:{actual_port}")
+    print(f"📁 Track: {chain_ref.dir_path}/runs/{run_id}.json")
     print(f"RUN_ID: {run_id}")
 
-    if run_once:
-        pid = read_pid(pid_file)
-        if pid:
-            kill_pid(pid)
-            pid_file.unlink(missing_ok=True)
+
+# def chain_run_detached(
+#     chain_ref: ChainRef,
+#     payload: Dict[str, Any],
+#     port_override: int | None = None,
+#     run_once: bool = True,
+# ) -> None:
+
+#     ensure_main_server()
+
+#     cfg = load_chain_cfg(chain_ref)
+#     print(f"chain config : {cfg}")
+
+#     pid_file = RUNTIME_DIR / f"{CHAIN_PID_PREFIX}{chain_ref.chain_id}.pid"
+
+#     # Prefer existing runtime port if available
+#     existing_pid, existing_port = read_pid_and_port(pid_file)
+#     if existing_pid and existing_port:
+#         actual_port = existing_port
+#     else:
+#         actual_port = port_override or derive_chain_port(chain_ref.chain_id)
+
+#     # ----------------------------------------------------------------------
+#     # ALWAYS GENERATE RUN_ID HERE — SINGLE SOURCE OF TRUTH
+#     # ----------------------------------------------------------------------
+#     run_id = run_registry_mod.make_run_id(chain_ref.chain_name)
+#     batch_id = None  # batch mode not used in direct detached run
+
+#     # ----------------------------------------------------------------------
+#     # Early checkpoint (pending)
+#     # ----------------------------------------------------------------------
+#     run_registry_mod.record_chain_run(
+#         chain_name=chain_ref.chain_name,
+#         chain_id=chain_ref.chain_id,
+#         chain_dir=chain_ref.dir_path,
+#         payload=payload,
+#         results=[],
+#         detached=True,
+#         success=False,
+#         run_id=run_id,
+#         cancelled=False,
+#         status="pending",
+#         current_step_index=-1,
+#     )
+
+#     # ----------------------------------------------------------------------
+#     # START RUNTIME IF NOT ALIVE
+#     # ----------------------------------------------------------------------
+#     existing_pid, existing_port = read_pid_and_port(pid_file)
+#     if existing_pid:
+#         try:
+#             os.kill(existing_pid, 0)
+#             actual_port = existing_port or actual_port
+#         except OSError:
+#             print("Process is not alive")
+#             existing_pid = None
+
+#     if not existing_pid:
+#         LOG_FILE = (
+#             RUNTIME_DIR / f"chain_{chain_ref.chain_name}-{chain_ref.chain_id}.log"
+#         )
+
+#         # ======================================================================
+#         # 🔥 CRITICAL PATCH — Inject absolute, unified FS paths into runtime
+#         # ======================================================================
+#         env = os.environ.copy()
+
+#         # ------------------------------------------------------------------
+#         # ⭐ CLEAN FIX: Forward ONLY essential LLM environment variables
+#         # ------------------------------------------------------------------
+#         LLM_ENV_KEYS = [
+#             "TH_LLM_PROVIDER",
+#             "TH_TEST_MODE",
+#             "OPENAI_API_KEY",
+#             "PERPLEXITY_API_KEY",
+#             "GEMINI_API_KEY",
+#             "TH_OPENAI_MODEL",
+#             "TH_PERPLEXITY_MODEL",
+#             "TH_GEMINI_MODEL",
+#             "TH_OPENAI_TEMPERATURE",
+#         ]
+
+#         for key in LLM_ENV_KEYS:
+#             value = os.getenv(key)
+#             if value:
+#                 env[key] = value
+#         # ------------------------------------------------------------------
+#         env["CHAIN_NAME"] = chain_ref.chain_name
+#         env["CHAIN_ID"] = chain_ref.chain_id
+#         env["CHAIN_DIR"] = str(chain_ref.dir_path)
+#         # 🔥 ADD THESE LINES:
+#         # from treehopper.treehopper_cancellation import DB_PATH
+#         # env["TREEHOPPER_DB_PATH"] = str(DB_PATH.resolve())  # ← Force same DB
+
+#         env["PROD"] = "1"
+
+#         # Absolute paths — the FIX for cancellation detection
+#         env["TREEHOPPER_TH_ROOT"] = str(TH_ROOT.resolve())
+#         env["TREEHOPPER_RUNTIME_DIR"] = str(RUNTIME_DIR.resolve())
+#         env["TREEHOPPER_CANCEL_DIR"] = str(CANCEL_DIR.resolve())
+
+#         # Uvicorn & Python safety
+#         env["PYTHONUNBUFFERED"] = "1"  # real-time logs
+#         env["UVICORN_WORKERS"] = "1"  # avoid forked workers (breaks FS sync)
+
+#         # ----------------------------------------------------------------------
+#         # DEV: inject local source into PYTHONPATH for subprocesses (guarded)
+#         # ----------------------------------------------------------------------
+#         # This is opt-in: set TREEHOPPER_DEV_MODE=1 in your shell / CI env to enable.
+#         try:
+#             # mark dev-mode for the child process (only when you explicitly opt in)
+#             if os.getenv("TREEHOPPER_DEV_MODE") == "1":
+#                 env["TREEHOPPER_DEV_MODE"] = "1"
+#             # import helper if present
+#             from treehopper.environment import inject_pythonpath
+
+#             # only run injection when dev flag present in environment or parent process
+#             if env.get("TREEHOPPER_DEV_MODE") == "1":
+#                 inject_pythonpath(env)
+#         except Exception:
+#             # Don't break if the helper isn't available — fallback to default behavior.
+#             pass
+#         # ----------------------------------------------------------------------
+
+#         # ======================================================================
+#         # Launch chain runtime
+#         # ======================================================================
+#         proc = subprocess.Popen(
+#             [
+#                 "uvicorn",
+#                 "treehopper.chain_runtime_app:app",
+#                 "--host",
+#                 "0.0.0.0",
+#                 "--port",
+#                 str(actual_port),
+#             ],
+#             env=env,
+#             stdout=open(LOG_FILE, "w"),
+#             stderr=subprocess.STDOUT,
+#         )
+
+#         write_pid(pid_file, proc.pid, actual_port)
+
+#         # Wait for runtime health
+#         for _ in range(40):
+#             try:
+#                 r = requests.get(
+#                     f"http://localhost:{actual_port}/api/v1/{chain_ref.chain_name}/health"
+#                 )
+#                 if r.status_code == 200:
+#                     break
+#             except requests.RequestException:
+#                 pass
+#             time.sleep(0.25)
+
+#     # ----------------------------------------------------------------------
+#     # POST request to runtime with forwarded run_id
+#     # ----------------------------------------------------------------------
+#     url = f"http://localhost:{actual_port}/api/v1/{chain_ref.chain_name}/run"
+
+#     headers = {
+#         "x-api-key": "demo-key-123",
+#         "X-Treehopper-Run-Id": run_id,
+#     }
+#     if batch_id:
+#         headers["X-Treehopper-Batch-Id"] = batch_id
+
+#     # ----------------------------------------------------------------------
+#     # 🔥 Minimal Patch:
+#     #   Fire-and-forget JSON POST using curl in a background subprocess.
+#     #   CLI returns immediately, chain runtime logs progress independently.
+#     #   No blocking → cancellation polling becomes correct.
+#     # ----------------------------------------------------------------------
+#     _post_runtime_detached(
+#         url=url, payload=payload or {}, headers=headers  # ← dict, NOT json.dumps
+#     )
+
+#     print(f"🚀 Detached chain triggered → run_id={run_id}")
+#     print(f"📡 Runtime executing independently at http://localhost:{actual_port}")
+#     print(f"📁 Track status via JSON at: {chain_ref.dir_path}/runs/{run_id}.json")
+
+#     print(f"RUN_ID: {run_id}")
+
+#     if run_once:
+#         pid = read_pid(pid_file)
+#         if pid:
+#             kill_pid(pid)
+#             pid_file.unlink(missing_ok=True)
 
 
 # -----------------------------------------------------------------------------
@@ -1058,16 +1276,13 @@ Treehopper Chain Commands
 
   [treehopper | th] chain run <name|id>
       [--payload '{...}'] [--payload-file file.json]
-      [--detached] [--bg]
+      [--detached]
       [--parallel N] [--concurrency M]
       Execute a chain sequentially.
       First agent gets payload; later agents receive mapped fields.
 
       --detached
            Launch a dedicated chain micro-app (async, cancellable, resumable).
-
-      --bg
-           Run the detached micro-app in background.
 
       --parallel N
            Run N independent chain executions in parallel (N run_ids).
@@ -1076,12 +1291,12 @@ Treehopper Chain Commands
            Max number of parallel runs at a time.
 
 Cancellation Support Matrix
-───────────────────────────────────────────────────────────────────────────────
-| Execution Mode                          | Cancellable? | Reason                          |
-|-----------------------------------------|--------------|---------------------------------|
-| chain run --detached                    |     YES      | async micro-app runtime         |
-| chain run --detached --bg               |     YES      | async runtime with background   |
-| chain run (non-detached)                |     NO       | blocking HTTP request           |
+───────────────────────────────────────────────────────────────────────────────---------------------------------
+| Execution Mode                          | Cancellable? | Reason                                              |
+|-----------------------------------------|--------------|-----------------------------------------------------|
+| chain start <chain_name> --bg           |     YES      | to start async micro-app runtime                    |
+| chain run <chain_name> --detached       |     YES      | to esxcute async micro-app runtime                  |
+| chain run <chain_name> (non detached)   |     NO       | to execute chain on main serverblocking HTTP request|
 
 Resume Functionality (Hybrid)
 ───────────────────────────────────────────────────────────────────────────────
@@ -1108,6 +1323,8 @@ Other Commands
   [treehopper | th] chain stop <name|id>            Stop detached chain runtime.
   [treehopper | th] chain delete <name|id>          Delete chain & history.
   [treehopper | th] chain logs <name|id>            Show last run summary.
+  [treehopper | th] chains status                   show all running chains.
+
 """
     )
 
@@ -1598,6 +1815,7 @@ def validate_routing_rules(cfg):
 
 
 def chain_entry(argv: List[str]) -> None:
+    ensure_dirs()
     if not argv:
         print_chain_help()
         sys.exit(1)
@@ -1606,6 +1824,7 @@ def chain_entry(argv: List[str]) -> None:
 
     if sub in {
         "build",
+        "start",
         "run",
         "stop",
         "delete",
@@ -1720,6 +1939,30 @@ def chain_entry(argv: List[str]) -> None:
             chain_build_multistep(chain_name, steps)
             return
 
+        if sub == "start":
+            ref = argv[1]
+            chain_ref = resolve_chain(ref)
+            parsed = parse_payload_args(argv[2:])
+            extra_args = parsed["args"]
+            # 3) detect --port <value>
+            port_override = None
+            if "--bg" not in extra_args:
+                print("❌ Missing --bg")
+                print("Usage - treehopper chain start <chain_name> --bg [--port]")
+                sys.exit(1)
+            if "--port" in extra_args:
+                idx = extra_args.index("--port")
+                if idx + 1 >= len(extra_args):
+                    print("❌ Missing value for --port")
+                    sys.exit(1)
+                try:
+                    port_override = int(extra_args[idx + 1])
+                except ValueError:
+                    print("❌ Invalid value for --port (must be integer)")
+                    sys.exit(1)
+                del extra_args[idx : idx + 2]
+            chain_start(chain_ref, port_override=port_override)
+
         if sub == "run":
             if len(argv) < 2:
                 print(
@@ -1737,6 +1980,7 @@ def chain_entry(argv: List[str]) -> None:
 
             # 2) detect bg (run-only)
             bg = "--bg" in extra_args
+            print(f"Background flag - {bg}")
             extra_args = [a for a in extra_args if a != "--bg"]
 
             # 3) detect --port <value>
@@ -1808,7 +2052,7 @@ def chain_entry(argv: List[str]) -> None:
                     chain_ref,
                     payload,
                     port_override=port_override,
-                    run_once=not bg,
+                    # run_once=not bg,
                 )
             else:
                 chain_run_local(chain_ref, payload)

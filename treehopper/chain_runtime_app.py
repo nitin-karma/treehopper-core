@@ -75,6 +75,16 @@ if ENV_RUNTIME_DIR:
 if ENV_CANCEL_DIR:
     _cfg.CANCEL_DIR = Path(ENV_CANCEL_DIR).resolve()
 
+# ======================================================================
+# 🔥 CRITICAL: DISCOVER AGENTS IN RUNTIME PROCESS
+# ======================================================================
+# from treehopper.treehopper import discover_agents
+
+# print("[runtime] Discovering agents...")
+# discover_agents()
+# print("[runtime] Agent discovery complete")
+
+
 TH_ROOT = _cfg.TH_ROOT
 RUNTIME_DIR = _cfg.RUNTIME_DIR
 CANCEL_DIR = _cfg.CANCEL_DIR

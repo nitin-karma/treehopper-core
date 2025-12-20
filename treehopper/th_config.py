@@ -3,13 +3,28 @@ import os
 from pathlib import Path
 from typing import Literal
 
-# Resolve HOME
+
 HOME = Path.home()
 
 # Allow runtime environment overrides (critical for cancellation correctness)
 # TH_ROOT = Path(os.getenv("TREEHOPPER_TH_ROOT", str(HOME / ".treehopper")))
 # Pick up env vars if set, otherwise default
+
 TH_ROOT = Path(os.getenv("TH_ROOT", str(HOME / ".treehopper")))
+
+# TH_ROOT = Path(
+#     os.getenv(
+#         "TREEHOPPER_HOME",        # ✅ canonical
+#         os.getenv(
+#             "TREEHOPPER_TH_ROOT", # backward compatible
+#             os.getenv(
+#                 "TH_ROOT",        # legacy
+#                 str(HOME / ".treehopper")
+#             )
+#         )
+#     )
+# ).resolve()
+
 # TH_ROOT = Path.home() / ".treehopper"
 # Registry layout
 REGISTRY_DIR = TH_ROOT / "registry"
@@ -44,11 +59,23 @@ CANCEL_TIMEOUT = 30  # safe but configurable
 SUBSCRIPTION_FILE = TH_ROOT / "subscription_id.txt"
 
 # Ensure directories exist on import
-for _d in (TH_ROOT, REGISTRY_DIR, REGISTRY_AGENTS, CHAINS_DIR, RUNTIME_DIR, CANCEL_DIR):
-    try:
+# for _d in (TH_ROOT, REGISTRY_DIR, REGISTRY_AGENTS, CHAINS_DIR, RUNTIME_DIR, CANCEL_DIR):
+#     try:
+#         _d.mkdir(parents=True, exist_ok=True)
+#     except Exception:
+#         pass
+
+
+def ensure_dirs():
+    for _d in (
+        TH_ROOT,
+        REGISTRY_DIR,
+        REGISTRY_AGENTS,
+        CHAINS_DIR,
+        RUNTIME_DIR,
+        CANCEL_DIR,
+    ):
         _d.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
 
 
 # -------------------------------------------------------------------
@@ -123,3 +150,16 @@ REQUIRED_FIELDS = {
     "run_completed": ["status"],
     "run_cancelled": [],
 }
+
+
+ASCII_BANNER = r"""
+████████╗██████╗ ███████╗███████╗██╗  ██╗ ██████╗ ██████╗ ██████╗ ███████╗██████╗  █████╗ ██╗
+╚══██╔══╝██╔══██╗██╔════╝██╔════╝██║  ██║██╔═══██╗██╔══██╗██╔══██╗██╔════╝██╔══██╗██╔══██╗██║
+   ██║   ██████╔╝█████╗  █████╗  ███████║██║   ██║██████╔╝██████╔╝█████╗  ██████╔╝███████║██║
+   ██║   ██╔══██╗██╔══╝  ██╔══╝  ██╔══██║██║   ██║██╔═══╝ ██╔═══╝ ██╔══╝  ██╔══██╗██╔══██║██║
+   ██║   ██║  ██║███████╗███████╗██║  ██║╚██████╔╝██║     ██║     ███████╗██║  ██║██║  ██║██║
+   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
+
+                        TreehopperAI v{version}
+            Think Globally. Compute Locally. Execute Intelligently.
+"""

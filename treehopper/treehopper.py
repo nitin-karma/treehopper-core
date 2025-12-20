@@ -569,6 +569,7 @@ async def run_chain_endpoint(chain_name: str, payload: dict | None = None):
     print("[run_chain_endpoint] starting from main server")
 
     cfg, chain_dir = resolve_chain_by_name(chain_name)
+    print(cfg, chain_dir)
 
     if "steps" in cfg:
         raise HTTPException(
@@ -582,6 +583,7 @@ async def run_chain_endpoint(chain_name: str, payload: dict | None = None):
         )
 
     agents_cfg = cfg.get("agents", [])
+    print(agents_cfg)
 
     if not agents_cfg:
         raise HTTPException(
@@ -631,7 +633,7 @@ async def run_chain_endpoint(chain_name: str, payload: dict | None = None):
                     # optional inputs are silently skipped
 
         result = await _execute_agent_step(step["path"], params)
-
+        print(result)
         results.append(result)
         prev_output = result if isinstance(result, dict) else {"result": result}
 
