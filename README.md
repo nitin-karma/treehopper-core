@@ -1,10 +1,8 @@
 <div align="center">
 
-# 🌿 Treehopper Core
+<img src="treehopper/static/treehopper_logo.png" alt="Treehopper Logo" width="180">
 
-### The Agent Builder & Orchestration Automation Framework
-
-<img src="treehopper/static/th_logo.png" alt="Treehopper Logo" width="180">
+### The Agent Builder & Orchestration Automation Runtime
 
 **Create, chain, and orchestrate autonomous agents — locally, on edge devices, or in distributed fleets.**
 
@@ -18,9 +16,39 @@
 
 ---
 
-## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> What Is Treehopper?
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> What Is TreehopperAI?
 
-**Treehopper** is a local-first, agent-centric, fully open-source automation framework for building intelligent workflows — from edge AI agents to orchestrated micro-services and distributed chains.
+**TreehopperAI** is a local-first, agent-centric, fully open-source automation framework for building intelligent workflows — from edge AI agents to orchestrated micro-services and distributed chains.
+
+```
+th whatis
+
+
+████████╗██████╗ ███████╗███████╗██╗  ██╗ ██████╗ ██████╗ ██████╗ ███████╗██████╗  █████╗ ██╗
+╚══██╔══╝██╔══██╗██╔════╝██╔════╝██║  ██║██╔═══██╗██╔══██╗██╔══██╗██╔════╝██╔══██╗██╔══██╗██║
+   ██║   ██████╔╝█████╗  █████╗  ███████║██║   ██║██████╔╝██████╔╝█████╗  ██████╔╝███████║██║
+   ██║   ██╔══██╗██╔══╝  ██╔══╝  ██╔══██║██║   ██║██╔═══╝ ██╔═══╝ ██╔══╝  ██╔══██╗██╔══██║██║
+   ██║   ██║  ██║███████╗███████╗██║  ██║╚██████╔╝██║     ██║     ███████╗██║  ██║██║  ██║██║
+   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
+
+                        TreehopperAI v0.1.0
+            Think Globally. Compute Locally. Execute Intelligently.
+
+
+TreehopperAI is a local-first, agentic workflow engine for building
+and executing intelligent chains of AI agents.
+
+Core Concepts
+─────────────
+Agent     → Single AI capability, also runs as a service
+Chain     → Workflow of agents, also runs as a service
+Runtime   → Long-lived execution
+Run       → One execution
+Detached  → Background, cancellable runs
+Replay    → Late joiner visibility
+
+
+```
 
 ## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Why This Project Matters
 
@@ -47,12 +75,12 @@ It brings together:
 | 🟥 **Deterministic** | Repeatable runs, structured history, and precise observability |
 | 🟪 **Cloud-optional** | You own the compute. You choose the LLM provider. No lock-in |
 
-> **Treehopper is a statement:**
+> **TreehopperAI is a statement:**
 > AI automation should be open, simple, transparent, and fully in the developer's control.
 
 ---
 
-## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Why Treehopper?
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Why TreehopperAI?
 
 | Feature | Description |
 |---------|-------------|
@@ -98,7 +126,11 @@ treehopper-core/
 │   ├── treehopper_chains.py       # Chain controller + parallel + cancellation
 │   ├── treehopper_parallel.py     # Parallel execution engine
 │   ├── treehopper_cancellation.py # Cancellation API (Phase 3.3)
-│   └── treehopper_cleaner.py      # Clean-up utility
+│   ├── treehopper_cleaner.py      # Clean-up utility
+|   ├── ..........
+|   ├── agent_runtime_app.py       # To create the detached agent runtime
+|   └── chain_runtime_app.py       # To create the detached chain runtime
+|
 ├── examples/                      # Agent & chain usage
 ├── static/                        # Branding & assets
 └── dashboard/                     # Optional UI
@@ -150,17 +182,9 @@ GET /api/v1/agents/greet?name=Nitin
 
 ## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Chaining Agents
 
-```http
-POST /api/v1/dev/chain
-{
-  "chain": [
-    { "path": "/api/v1/agents/greet", "params": { "name": "Nitin" } },
-    { "path": "/api/v1/agents/llm_compare", "params": { "prompt": "Write a haiku about agents" } }
-  ]
-}
 ```
-
-Treehopper executes each step sequentially, passing outputs downstream.
+th build chain <chain_name> <agentname> <agentname> ...
+```
 
 ---
 

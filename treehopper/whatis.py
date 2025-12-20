@@ -3,6 +3,7 @@ from treehopper.th_config import VERSION, ASCII_BANNER
 
 def print_whatis():
     print(ASCII_BANNER.format(version=VERSION))
+    print("")
     print(
         """
 TreehopperAI is a local-first, agentic workflow engine for building
