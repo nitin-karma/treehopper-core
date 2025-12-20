@@ -23,7 +23,7 @@ treehopper run --bg
 treehopper stop
 treehopper status
 
-treehopper agent init <agent1>
+treehopper init <agent1>
 treehopper agent lint <agent1>
 treehopper agent build <agent1>
 treehopper chain build <chain> <agent1> <agent2>....
