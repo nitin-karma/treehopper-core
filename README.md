@@ -95,6 +95,60 @@ It brings together:
 
 ---
 
+## Who Is TreehopperAI For?
+
+TreehopperAI is designed for:
+
+- Backend & platform engineers building AI-powered workflows
+- Developers deploying AI agents to edge devices or private infra
+- Teams who want orchestration **without** vendor lock-in
+- Startups prototyping AI automation quickly
+- Enterprises experimenting with local-first AI systems
+
+If you are tired of heavyweight orchestrators and want full control —
+TreehopperAI is for you.
+
+## Real-World Example Chains (Included)
+
+Treehopper ships with realistic, production-inspired examples:
+
+- **Manufacturing RCA Chain**
+  - Image defect analysis
+  - Equipment logs
+  - Root cause identification
+  - Automated dispatch
+
+- **Finance Fraud Detection**
+  - Risk scoring
+  - Behavioral analysis
+  - Composite decision routing
+
+- **Bioinformatics Pipelines**
+  - Data validation
+  - Risk assessment
+  - Report aggregation
+
+These examples are runnable locally and serve as reference architectures.
+
+## Security & Privacy
+
+TreehopperAI runs **entirely on infrastructure you control**.
+
+- No telemetry
+- No hidden network calls
+- No mandatory cloud dependencies
+
+LLM providers are opt-in and configurable.
+
+## Roadmap
+
+- Agent & chain visualizer (minimal UI)
+- Plugin system for custom runtimes
+- More example chains (industry-specific)
+- Optional metrics & observability adapters
+- Community-contributed agent library
+
+
 ## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Quickstart
 
 ```bash
@@ -103,7 +157,7 @@ cd treehopper-core
 pip install -e .
 
 # Start main server
-[treehopper / th] run
+[treehopper / th] start --bg
 ```
 
 **Open Swagger UI:**
@@ -408,7 +462,7 @@ Treehopper is built on the belief that AI automation should be **democratized**.
 
 **Local-first. Open. Portable. Modular. Hackable. Developer-owned.**
 
-If you believe in that future — **welcome to Treehopper.**
+If you believe in that future — **welcome to TreehopperAI.**
 
 ---
 
