@@ -25,10 +25,14 @@ DYNAMIC_CHAIN="dynamic_doc_intel"
 PAYLOAD='{"file_path":"shared/pdf_extractor-a1b2c3d4/files/contract.pdf"}'
 
 cleanup() {
-  echo "🛑 Cleaning up..."
+  if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+    echo "ℹ️ Skipping cleanup in GitHub Actions"
+    return
+  fi
   th stop >/dev/null 2>&1 || true
   rm -rf "$TH_ROOT"
 }
+
 trap cleanup EXIT
 
 # ------------------------------
@@ -208,3 +212,4 @@ echo ""
 echo "🎉 REAL E2E PASSED — ALL MODES VERIFIED"
 echo "---------------------------------------------"
 echo ""
+exit 0
