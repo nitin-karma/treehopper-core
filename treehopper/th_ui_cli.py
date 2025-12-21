@@ -1,9 +1,52 @@
 import os
+import time
 import sys
 import subprocess
 import signal
+import socket
 from pathlib import Path
 from treehopper.th_config import DEFAULT_UI_PORT, RUNTIME_DIR
+from treehopper.logging import get_logger
+
+logger = get_logger()
+
+
+def is_port_in_use(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(("localhost", port)) == 0
+
+
+def kill_ui_pid(pid: int):
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError as e:
+        logger.error(f"{str(e)}")
+        return True
+    time.sleep(3)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError as e:
+        logger.error(f"{str(e)}")
+        return True
+    return True
+
+
+def read_ui_pid(path: Path) -> int | None:
+    """
+    Read PID from file. Accepts both "<pid>" and "<pid>:<port>" formats.
+    Returns pid (int) or None.
+    """
+    if not path.exists():
+        return None
+    try:
+        text = path.read_text().strip()
+        if ":" in text:
+            pid_str, _ = text.split(":", 1)
+            return int(pid_str)
+        return int(text)
+    except Exception as e:
+        logger.error(f"{str(e)}")
+        return None
 
 
 def _get_runtime_dir() -> Path:
@@ -30,6 +73,10 @@ def launch_ui():
 
     if "--fg" in args:
         fg = True
+
+    if is_port_in_use(port):
+        print(f"❌ Port {port} is already in use. Please run 'th stop ui' first.")
+        return
 
     runtime = _get_runtime_dir()
     pid_file = runtime / "ui.pid"
@@ -64,6 +111,7 @@ def launch_ui():
         stdout=log_f,  # Redirect standard output to file
         stderr=subprocess.STDOUT,  # Redirect errors to the same file
         env=os.environ.copy(),
+        start_new_session=True,  # <--- ADD THIS
     )
 
     pid_file.write_text(str(proc.pid))
@@ -75,24 +123,29 @@ def launch_ui():
 
 
 def stop_ui():
-    """
-    Stop Treehopper UI
-    """
     runtime = _get_runtime_dir()
     pid_file = runtime / "ui.pid"
 
-    if not pid_file.exists():
+    # Using your read_pid helper style
+    pid = read_ui_pid(pid_file)
+
+    if not pid:
         print("⚠️ Treehopper UI is not running")
         return
 
-    pid = int(pid_file.read_text())
+    print(f"🛑 Stopping Treehopper UI (PID {pid})")
 
     try:
-        os.kill(pid, signal.SIGTERM)
-        pid_file.unlink()
-        print(f"🛑 Treehopper UI stopped (PID {pid})")
+        # Instead of just kill_pid(pid), we kill the Group
+        # This is the "Magic Sauce" for Uvicorn on macOS
+        kill_ui_pid(pid)
+        pid_file.unlink(missing_ok=True)
+        print("✔ Stopped")
     except ProcessLookupError:
         print("⚠️ UI process already stopped")
-        pid_file.unlink()
+        pid_file.unlink(missing_ok=True)
     except Exception as e:
-        print(f"❌ Failed to stop UI: {e}")
+        # Fallback to your standard agent kill if group kill fails
+        logger.error(str(e))
+        kill_ui_pid(pid)
+        pid_file.unlink(missing_ok=True)

@@ -169,3 +169,4 @@ ASCII_BANNER = r"""
 # BUILTIN UI Tool
 # ==================
 DEFAULT_UI_PORT = 8090
+LOG_RENDER_LIMIT = 500
