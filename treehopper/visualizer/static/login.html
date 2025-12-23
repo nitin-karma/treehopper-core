@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TreehopperAI - Login</title>
+  <link rel="stylesheet" href="auth_style.css">
+</head>
+<body>
+  <!-- Theme Toggle Button -->
+  <div class="theme-toggle" onclick="toggleTheme()" title="Toggle Theme">
+    <span id="themeIcon">☀️</span>
+  </div>
+
+  <div class="login-container">
+    <div class="logo-section">
+      <img src="treehopper_logo.png" alt="TreehopperAI" class="logo">
+      <div class="logo-text">TreehopperAI</div>
+      <div class="logo-subtitle">Dashboard Access</div>
+    </div>
+
+    <div class="error-message" id="errorMessage"></div>
+    <div class="success-message" id="successMessage"></div>
+
+    <form id="loginForm">
+      <div class="form-group">
+        <label class="form-label" for="username">Username</label>
+        <input type="text" id="username" name="username" class="form-input" placeholder="Enter your username" autocomplete="username" required>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="password">Password</label>
+        <div class="password-input-wrapper">
+          <input type="password" id="password" name="password" class="form-input" placeholder="Enter your password" autocomplete="current-password" required>
+          <button type="button" class="password-toggle" onclick="togglePasswordVisibility('password', 'passwordToggleIcon')">
+            <span id="passwordToggleIcon">👁️</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="remember-forgot">
+        <label class="remember-me">
+          <input type="checkbox" id="rememberMe">
+          <span>Remember me</span>
+        </label>
+        <a class="forgot-password" onclick="showForgotPasswordModal()">Forgot password?</a>
+      </div>
+
+      <button type="submit" class="login-button" id="loginButton">
+        <span class="button-content" id="buttonContent">Sign In</span>
+      </button>
+    </form>
+
+    <footer class="dashboard-footer">
+      <span>&copy; 2025-2026</span>
+      <img src="treehopper_logo.png" alt="TreehopperAI Logo" class="footer-logo">
+      <span>TreehopperAI</span>
+    </footer>
+  </div>
+
+  <!-- First Time Password Change Modal -->
+  <div id="changePasswordModal" class="modal">
+    <div class="modal-content">
+      <h2 class="modal-header">Change Your Password</h2>
+      <p class="modal-subtitle">Please set a new secure password for your account</p>
+
+      <div class="password-requirements">
+        <strong>Password Requirements:</strong>
+        <ul>
+          <li>Minimum 8 characters</li>
+          <li>At least one uppercase letter (A-Z)</li>
+          <li>At least one lowercase letter (a-z)</li>
+          <li>At least one number (0-9)</li>
+          <li>At least one special character (@$!%*?&)</li>
+        </ul>
+      </div>
+
+      <form id="changePasswordForm">
+        <div class="form-group">
+          <label class="form-label" for="newPassword">New Password</label>
+          <div class="password-input-wrapper">
+            <input type="password" id="newPassword" class="form-input" placeholder="Enter new password" required>
+            <button type="button" class="password-toggle" onclick="togglePasswordVisibility('newPassword', 'newPasswordToggleIcon')">
+              <span id="newPasswordToggleIcon">👁️</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="confirmPassword">Confirm Password</label>
+          <div class="password-input-wrapper">
+            <input type="password" id="confirmPassword" class="form-input" placeholder="Confirm new password" required>
+            <button type="button" class="password-toggle" onclick="togglePasswordVisibility('confirmPassword', 'confirmPasswordToggleIcon')">
+              <span id="confirmPasswordToggleIcon">👁️</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="error-message" id="passwordError"></div>
+
+        <button type="submit" class="login-button" id="changePasswordButton">
+          <span class="button-content" id="changePasswordContent">Update Password</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Forgot Password Modal -->
+  <div id="forgotPasswordModal" class="modal">
+    <div class="modal-content">
+      <span class="close-btn" onclick="closeForgotPasswordModal()">&times;</span>
+      <h2 class="modal-header">Reset Password</h2>
+      <p class="modal-subtitle">Enter your username to reset your password</p>
+
+      <form id="forgotPasswordForm">
+        <div class="form-group">
+          <label class="form-label" for="resetUsername">Username</label>
+          <input type="text" id="resetUsername" class="form-input" placeholder="Enter your username" required>
+        </div>
+
+        <div class="form-group" id="newPasswordGroup" style="display: none;">
+          <label class="form-label" for="resetNewPassword">New Password</label>
+          <div class="password-input-wrapper">
+            <input type="password" id="resetNewPassword" class="form-input" placeholder="Enter new password">
+            <button type="button" class="password-toggle" onclick="togglePasswordVisibility('resetNewPassword', 'resetNewPasswordToggleIcon')">
+              <span id="resetNewPasswordToggleIcon">👁️</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="form-group" id="confirmPasswordGroup" style="display: none;">
+          <label class="form-label" for="resetConfirmPassword">Confirm Password</label>
+          <div class="password-input-wrapper">
+            <input type="password" id="resetConfirmPassword" class="form-input" placeholder="Confirm new password">
+            <button type="button" class="password-toggle" onclick="togglePasswordVisibility('resetConfirmPassword', 'resetConfirmPasswordToggleIcon')">
+              <span id="resetConfirmPasswordToggleIcon">👁️</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="password-requirements" id="resetPasswordReqs" style="display: none;">
+          <strong>Password Requirements:</strong>
+          <ul>
+            <li>Minimum 8 characters</li>
+            <li>At least one uppercase letter (A-Z)</li>
+            <li>At least one lowercase letter (a-z)</li>
+            <li>At least one number (0-9)</li>
+            <li>At least one special character (@$!%*?&)</li>
+          </ul>
+        </div>
+
+        <div class="error-message" id="forgotPasswordError"></div>
+        <div class="success-message" id="forgotPasswordSuccess"></div>
+
+        <button type="submit" class="login-button" id="forgotPasswordButton">
+          <span class="button-content" id="forgotPasswordContent">Continue</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script src="auth-login.js"></script>
+</body>
+</html>

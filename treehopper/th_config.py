@@ -170,3 +170,10 @@ ASCII_BANNER = r"""
 # ==================
 DEFAULT_UI_PORT = 8090
 LOG_RENDER_LIMIT = 500
+DASHBOARD_DB_NAME = "dashboard_config.db"
+DB_DIR = "dashboard_db"
+ROLES = ["admin", "developer"]
+PERM = ["manage_users", "view_dashboard", "execute_chains"]
+DASHBOARD_HEADER = "TreehopperDash"
+ACCESS_TOKEN_EXPIRE_MINUTES = 600
+LOG_SCHEDULE = ["1h", "24h", "7d"]

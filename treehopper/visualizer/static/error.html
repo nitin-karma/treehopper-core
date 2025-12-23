@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Error - TreehopperAI</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .error-container {
+      background: rgba(15, 23, 42, 0.8);
+      backdrop-filter: blur(10px);
+      border-radius: 20px;
+      padding: 50px 40px;
+      width: 100%;
+      max-width: 600px;
+      border: 2px solid rgba(239, 68, 68, 0.3);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+      text-align: center;
+    }
+
+    .error-icon {
+      font-size: 80px;
+      margin-bottom: 20px;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.1); }
+    }
+
+    .error-code {
+      font-size: 72px;
+      font-weight: 800;
+      color: #ef4444;
+      margin-bottom: 10px;
+      text-shadow: 0 0 30px rgba(239, 68, 68, 0.5);
+    }
+
+    .error-title {
+      font-size: 28px;
+      font-weight: 700;
+      color: #e2e8f0;
+      margin-bottom: 15px;
+    }
+
+    .error-message {
+      font-size: 16px;
+      color: #94a3b8;
+      line-height: 1.6;
+      margin-bottom: 30px;
+      padding: 0 20px;
+    }
+
+    .error-details {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 30px;
+      text-align: left;
+    }
+
+    .error-details-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #ef4444;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .error-details-content {
+      font-size: 14px;
+      color: #cbd5e1;
+      font-family: 'Courier New', monospace;
+      word-break: break-word;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 15px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .error-button {
+      padding: 14px 30px;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+      text-decoration: none;
+      display: inline-block;
+    }
+
+    .primary-button {
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      color: white;
+      box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+    }
+
+    .primary-button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+    }
+
+    .secondary-button {
+      background: rgba(148, 163, 184, 0.2);
+      color: #e2e8f0;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+    }
+
+    .secondary-button:hover {
+      background: rgba(148, 163, 184, 0.3);
+      transform: translateY(-2px);
+    }
+
+    .footer {
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(148, 163, 184, 0.2);
+      color: #64748b;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .footer-logo {
+      height: 20px;
+      width: auto;
+      border-radius: 4px;
+    }
+
+    /* Animation for page load */
+    .error-container {
+      animation: slideIn 0.5s ease-out;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(-20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="error-container">
+    <div class="error-icon" id="errorIcon">⚠️</div>
+    <div class="error-code" id="errorCode">Error</div>
+    <h1 class="error-title" id="errorTitle">Something Went Wrong</h1>
+    <p class="error-message" id="errorMessage">
+      An unexpected error occurred. Please try again or contact support if the problem persists.
+    </p>
+
+    <div class="error-details" id="errorDetails" style="display: none;">
+      <div class="error-details-title">Error Details</div>
+      <div class="error-details-content" id="errorDetailsContent"></div>
+    </div>
+
+    <div class="button-group">
+      <a href="/home" class="error-button primary-button">Go to Dashboard</a>
+      <a href="/" class="error-button secondary-button">Go to Login</a>
+      <button onclick="window.history.back()" class="error-button secondary-button">Go Back</button>
+    </div>
+
+    <div class="footer">
+      <span>&copy; 2025-2026</span>
+      <img src="treehopper_logo.png" alt="TreehopperAI Logo" class="footer-logo">
+      <span>TreehopperAI</span>
+    </div>
+  </div>
+
+  <script>
+    // Parse URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const errorCode = urlParams.get('code') || 'ERROR';
+    const errorTitle = urlParams.get('title') || 'Something Went Wrong';
+    const errorMessage = urlParams.get('message') || 'An unexpected error occurred. Please try again or contact support if the problem persists.';
+    const errorDetails = urlParams.get('details');
+
+    // Update page content
+    document.getElementById('errorCode').textContent = errorCode;
+    document.getElementById('errorTitle').textContent = errorTitle;
+    document.getElementById('errorMessage').textContent = errorMessage;
+
+    // Set error icon based on error code
+    const errorIcon = document.getElementById('errorIcon');
+    if (errorCode === '404') {
+      errorIcon.textContent = '🔍';
+    } else if (errorCode === '403') {
+      errorIcon.textContent = '🚫';
+    } else if (errorCode === '401') {
+      errorIcon.textContent = '🔒';
+    } else if (errorCode === '500') {
+      errorIcon.textContent = '💥';
+    } else {
+      errorIcon.textContent = '⚠️';
+    }
+
+    // Show error details if provided
+    if (errorDetails) {
+      document.getElementById('errorDetails').style.display = 'block';
+      document.getElementById('errorDetailsContent').textContent = decodeURIComponent(errorDetails);
+    }
+
+    // Log error to console for debugging
+    console.error('Error Page:', {
+      code: errorCode,
+      title: errorTitle,
+      message: errorMessage,
+      details: errorDetails
+    });
+  </script>
+</body>
+</html>

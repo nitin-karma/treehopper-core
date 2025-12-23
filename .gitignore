@@ -43,3 +43,7 @@ diagnostics/
 test.txt
 old_tests/
 examples/response.json
+synthetic_response.json
+summary_1h.json
+summary_24h.json
+summary_7d.json

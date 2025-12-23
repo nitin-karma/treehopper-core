@@ -1,557 +1,1677 @@
 /**
- * SECURE API FETCH HELPER
+ * TreehopperAI Dashboard - Complete Script
+ * Includes: Core functionality, Analytics, Chain Flow Visualization, JWT Auth
  */
-async function apiFetch(url) {
-    const response = await fetch(url, {
-        headers: { 'X-Requested-With': 'TreehopperDash' }
-    });
-    if (!response.ok) throw new Error(`API Error: ${response.status}`);
-    return response.json();
-}
-let currentPage = 1;
-const logsPerPage = 50;
-const maxPages = 10;
-
-let updateInterval;
-let allLogs = [];
-let runWs;
-let wsEvents;
-
-let activeFilters = {
-    agentsList: "",
-    chainsList: "",
-    pidsList: "",
-    inputFilesList: ""
-};
-
-/* --- UI HELPERS --- */
-
-function toggleMenu() {
-    document.getElementById('dropdownMenu').classList.toggle('active');
-}
-
-document.addEventListener('click', (e) => {
-    const menu = document.getElementById('dropdownMenu');
-    const burger = document.querySelector('.hamburger-btn');
-    if (menu && !menu.contains(e.target) && !burger.contains(e.target)) {
-        menu.classList.remove('active');
-    }
-});
-
-function openModal(id) {
-    document.getElementById(id).style.display = "block";
-    document.getElementById('dropdownMenu').classList.remove('active');
-}
-
-function closeModal(id) {
-    document.getElementById(id).style.display = "none";
-}
-
-window.onclick = (e) => {
-    if (e.target.classList.contains('modal')) e.target.style.display = "none";
-}
-
-/* --- THEME MANAGEMENT --- */
-
-function toggleTheme() {
-    const isLight = document.body.classList.toggle('light-mode');
-    document.getElementById('themeIcon').textContent = isLight ? '🌙' : '☀️';
-    localStorage.setItem('theme', isLight ? 'light' : 'dark');
-}
-
-function loadTheme() {
-    if (localStorage.getItem('theme') === 'light') {
-        document.body.classList.add('light-mode');
-        document.getElementById('themeIcon').textContent = '🌙';
-    }
-}
-
-/* --- DATA LOADING --- */
-
-async function loadState() {
-    try {
-        const data = await apiFetch('/api/state');
-        const statusText = document.getElementById('statusText');
-        const statusMonitor = document.getElementById('liveStatus');
-        statusText.textContent = 'Online';
-        statusMonitor.classList.add('online'); // Starts the green blink
-
-        // Update agents
-        const agentsList = document.getElementById('agentsList');
-        if (data.agents?.length > 0) {
-            agentsList.innerHTML = data.agents.map(agent => `
-                <div class="list-item">
-                    <div style="flex: 1;">
-                        <div class="list-item-name">${agent.name || 'Unknown'}</div>
-                        <div class="list-item-id">${agent.id || 'N/A'}</div>
-                    </div>
-                    <button class="action-btn icon-btn" onclick="showAgentYaml('${agent.name}')" title="YAML">📄</button>
-                </div>
-            `).join('');
-            document.getElementById('agentCount').textContent = data.agents.length;
-        } else {
-            agentsList.innerHTML = '<div class="empty-state">No agents found</div>';
-            document.getElementById('agentCount').textContent = '0';
-        }
-
-        // Update chains
-        const chainsList = document.getElementById('chainsList');
-        if (data.chains?.length > 0) {
-            chainsList.innerHTML = data.chains.map(chain => `
-                <div class="list-item">
-                    <div style="flex: 1;">
-                        <div class="list-item-name">${chain.name || 'Unknown'}</div>
-                        <div class="list-item-id">${chain.id || 'N/A'}</div>
-                    </div>
-                    <div class="item-actions">
-                        <button class="action-btn icon-btn"
-                                onclick="showChainYaml('${chain.name}')"
-                                title="YAML">📄</button>
-                        <button class="action-btn icon-btn"
-                                onclick="showChainFlow('${chain.name}')"
-                                title="Flow">🌿</button>
-                        <button class="action-btn icon-btn"
-                                onclick="showLastRun('${chain.name}')"
-                                title="Last Run">⏱️</button>
-                    </div>
-                </div>
-            `).join('');
-            document.getElementById('chainCount').textContent = data.chains.length;
-        } else {
-            chainsList.innerHTML = '<div class="empty-state">No chains found</div>';
-            document.getElementById('chainCount').textContent = '0';
-        }
-
-        // Update PIDs (FIXED: Added list-item class for search)
-        const pidsList = document.getElementById('pidsList');
-        const pEntries = Object.entries(data.pids || {});
-        if (pEntries.length > 0) {
-            pidsList.innerHTML = pEntries.map(([name, pid]) => `
-                <div class="list-item">
-                    <div style="flex:1">
-                        <div class="list-item-name">⚙️ ${name}</div>
-                        <div class="list-item-id">PID: ${pid}</div>
-                    </div>
-                </div>
-            `).join('');
-            document.getElementById('pidCount').textContent = pEntries.length;
-        } else {
-            pidsList.innerHTML = '<div class="empty-state">No processes found</div>';
-            document.getElementById('pidCount').textContent = '0';
-        }
-
-        // Re-apply filters after content update
-        applyFilter('agentsList');
-        applyFilter('chainsList');
-        applyFilter('pidsList');
-
-    } catch (error) {
-        console.error('Error loading state:', error);
-        const statusText = document.getElementById('statusText');
-        const statusMonitor = document.getElementById('liveStatus');
-
-        statusText.textContent = 'Error';
-        statusMonitor.classList.remove('online'); // Turns off the green blink
-    }
-}
-
-/* --- LOGGING SYSTEM --- */
-
-
-// function renderLogs(logs) {
-//     const logsContainer = document.getElementById('logsContainer');
-//     const paginationContainer = document.getElementById('logPagination');
-
-//     if (!logs?.length) {
-//         logsContainer.innerHTML = '<div class="no-results">No logs match your search</div>';
-//         paginationContainer.innerHTML = '';
-//         return;
-//     }
-
-//     // --- PAGINATION LOGIC ---
-//     const totalLogs = logs.length;
-//     const totalPages = Math.min(Math.ceil(totalLogs / logsPerPage), maxPages);
-
-//     // Safety check for bounds
-//     if (currentPage > totalPages) currentPage = totalPages;
-//     if (currentPage < 1) currentPage = 1;
-
-//     const startIndex = (currentPage - 1) * logsPerPage;
-//     const endIndex = startIndex + logsPerPage;
-//     const paginatedLogs = logs.slice(startIndex, endIndex);
-
-//     console.log(`📑 Rendering Page ${currentPage} of ${totalPages} (Indices ${startIndex} to ${endIndex})`);
-
-//     // --- RENDER TABLE ---
-//     let tableHTML = `<table class="log-table"><thead><tr><th>Timestamp</th><th>Level</th><th>Logger</th><th>Message</th></tr></thead><tbody>`;
-//     paginatedLogs.forEach(log => {
-//         const levelClass = log.level.toLowerCase();
-//         tableHTML += `
-//           <tr class="${['error', 'warning', 'success'].includes(levelClass) ? levelClass : ''}">
-//             <td class="log-timestamp">${log.timestamp}</td>
-//             <td><span class="log-level ${levelClass}">${log.level}</span></td>
-//             <td class="log-logger">${escapeHtml(log.logger)}</td>
-//             <td class="log-message">${escapeHtml(log.message)}</td>
-//           </tr>`;
-//     });
-//     logsContainer.innerHTML = tableHTML + `</tbody></table>`;
-
-//     // --- RENDER PAGINATION BUTTONS ---
-//     let paginationHTML = '<span style="color: #64748b; font-size: 12px; margin-right: 10px;">Page:</span>';
-//     if (totalPages > 1) {
-//         for (let i = 1; i <= totalPages; i++) {
-//             paginationHTML += `
-//                 <button class="page-btn ${i === currentPage ? 'active' : ''}"
-//                         onclick="changePage(${i})">${i}</button>`;
-//         }
-//     }
-//     paginationContainer.innerHTML = paginationHTML;
-// }
-
-function renderLogs(logs) {
-    const logsContainer = document.getElementById('logsContainer');
-    const paginationContainer = document.getElementById('logPagination');
-
-    if (!logs?.length) {
-        logsContainer.innerHTML = '<div class="no-results">No logs match your search</div>';
-        paginationContainer.innerHTML = '';
-        return;
-    }
-
-    const totalLogs = logs.length;
-    const totalPages = Math.min(Math.ceil(totalLogs / logsPerPage), maxPages);
-
-    if (currentPage > totalPages) currentPage = totalPages;
-    if (currentPage < 1) currentPage = 1;
-
-    const startIndex = (currentPage - 1) * logsPerPage;
-    const endIndex = startIndex + logsPerPage;
-    const paginatedLogs = logs.slice(startIndex, endIndex);
-
-    // Render Table
-    let tableHTML = `<table class="log-table"><thead><tr><th>Timestamp</th><th>Level</th><th>Logger</th><th>Message</th></tr></thead><tbody>`;
-    paginatedLogs.forEach(log => {
-        const levelClass = log.level.toLowerCase();
-        tableHTML += `
-          <tr class="${['error', 'warning', 'success'].includes(levelClass) ? levelClass : ''}">
-            <td class="log-timestamp">${log.timestamp}</td>
-            <td><span class="log-level ${levelClass}">${log.level}</span></td>
-            <td class="log-logger">${escapeHtml(log.logger)}</td>
-            <td class="log-message">${escapeHtml(log.message)}</td>
-          </tr>`;
-    });
-    logsContainer.innerHTML = tableHTML + `</tbody></table>`;
-
-    // --- RENDER PAGINATION (Aligned Right) ---
-    let paginationHTML = `
-        <span style="color: #64748b; font-size: 12px; margin-right: auto; padding-left: 10px;">
-            Showing ${startIndex + 1}-${Math.min(endIndex, totalLogs)} of ${totalLogs}
-        </span>
-    `;
-
-    if (totalPages > 1) {
-        // Prev Button
-        paginationHTML += `<button class="page-btn" ${currentPage === 1 ? 'disabled' : ''}
-                            onclick="changePage(${currentPage - 1})">❮</button>`;
-
-        // Page Numbers
-        for (let i = 1; i <= totalPages; i++) {
-            paginationHTML += `
-                <button class="page-btn ${i === currentPage ? 'active' : ''}"
-                        onclick="changePage(${i})">${i}</button>`;
-        }
-
-        // Next Button
-        paginationHTML += `<button class="page-btn" ${currentPage === totalPages ? 'disabled' : ''}
-                            onclick="changePage(${currentPage + 1})">❯</button>`;
-    }
-
-    paginationContainer.innerHTML = paginationHTML;
-}
-
-function changePage(page) {
-    console.log(`🖱️ User clicked page: ${page}`);
-    currentPage = page;
-    filterLogs();
-    // Scroll logs header into view so user sees the top of the new page
-    document.querySelector('.logs-card').scrollIntoView({ behavior: 'smooth' });
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-async function loadLogs() {
-    console.log("📂 Fetching logs from API...");
-    try {
-        const data = await apiFetch('/api/logs');
-        console.log(`📥 Received ${data.length} raw log entries`);
-
-        if (Array.isArray(data) && data.length > 0) {
-            allLogs = data.map(log => {
-                let ts = log.ts || 0;
-                if (ts < 10000000000) ts *= 1000;
-                const date = new Date(ts);
-                return {
-                    timestamp: isNaN(date.getTime()) ? '-' : date.toISOString().replace('T', ' ').split('.')[0],
-                    level: log.level || 'INFO',
-                    logger: log.logger || '-',
-                    message: log.msg || JSON.stringify(log)
-                };
-            }).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-            console.log("✅ Logs processed and sorted. Triggering filter/render.");
-            filterLogs();
-        } else {
-            console.warn("⚠️ No logs returned from server.");
-            document.getElementById('logsContainer').innerHTML = '<div class="empty-state">No logs available</div>';
-        }
-    } catch (e) {
-        console.error('❌ Log Load Error:', e);
-    }
-}
-
-// async function loadLogs() {
-//     try {
-//         const data = await apiFetch('/api/logs');
-//         if (Array.isArray(data) && data.length > 0) {
-//             allLogs = data.map(log => {
-//                 let ts = log.ts || 0;
-//                 if (ts < 10000000000) ts *= 1000;
-//                 const date = new Date(ts);
-//                 return {
-//                     timestamp: isNaN(date.getTime()) ? '-' : date.toISOString().replace('T', ' ').split('.')[0],
-//                     level: log.level || 'INFO',
-//                     logger: log.logger || '-',
-//                     message: log.msg || JSON.stringify(log)
-//                 };
-//             }).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-//             filterLogs();
-//         } else {
-//             document.getElementById('logsContainer').innerHTML = '<div class="empty-state">No logs available</div>';
-//         }
-//     } catch (e) { console.error('Log Load Error:', e); }
-// }
-
-// function filterLogs() {
-//     const term = document.getElementById('logSearch').value.toLowerCase();
-//     renderLogs(!term ? allLogs : allLogs.filter(l => Object.values(l).some(v => v.toLowerCase().includes(term))));
-// }
-
-
-
-// Update this in your existing filterLogs to reset to page 1 when searching
-// function filterLogs() {
-//     currentPage = 1; // Reset to first page on search
-//     const searchTerm = document.getElementById('logSearch').value.toLowerCase();
-
-//     const filtered = !searchTerm
-//         ? allLogs
-//         : allLogs.filter(l => Object.values(l).some(v => String(v).toLowerCase().includes(searchTerm)));
-
-//     renderLogs(filtered);
-// }
-
-function filterLogs() {
-    const searchTerm = document.getElementById('logSearch').value.toLowerCase();
-    console.log(`🔍 Filtering logs with term: "${searchTerm}"`);
-
-    const filtered = !searchTerm
-        ? allLogs
-        : allLogs.filter(l => Object.values(l).some(v => String(v).toLowerCase().includes(searchTerm)));
-
-    console.log(`📊 Filtered results count: ${filtered.length}`);
-    renderLogs(filtered);
-}
-
-
-/* --- MODAL ACTIONS (Subscription/YAML) --- */
-async function showSubscription() {
-    try {
-        const j = await apiFetch("/api/v1/sys/subscription");
-        document.getElementById("subscriptionContent").textContent = `ID: ${j.subscription_id}\nCreated: ${new Date(j.created_at * 1000)}`;
-        openModal("subscriptionModal");
-    } catch (e) { console.error(e); }
-}
-
-async function showChainYaml(name) {
-    try {
-        const j = await apiFetch(`/api/v1/chains/${name}/yaml`);
-        document.getElementById("chainYamlTitle").innerText = name;
-        document.getElementById("chainYamlBody").textContent = j.yaml;
-        openModal("chainYamlModal");
-    } catch (e) { console.error(e); }
-}
-
-async function showChainFlow(name) {
-    try {
-        const j = await apiFetch(`/api/v1/chains/${name}/flow`);
-        document.getElementById("chainFlowTitle").innerText = name;
-        document.getElementById("chainFlowBody").textContent = JSON.stringify(j, null, 2);
-        openModal('chainFlowModal');
-    } catch (e) { console.error(e); }
-}
-
-async function showLastRun(name) {
-    try {
-        const j = await apiFetch(`/api/v1/chains/${name}/lastrun`);
-        document.getElementById("lastRunTitle").innerText = name;
-        document.getElementById("lastRunBody").textContent = JSON.stringify(j, null, 2);
-        openModal('lastRunModal');
-    } catch (e) { console.error(e); }
-}
-
-async function showAgentYaml(name) {
-    try {
-        const j = await apiFetch(`/api/v1/agents/${name}/yaml`);
-        document.getElementById("agentYamlTitle").innerText = name;
-        document.getElementById("agentYamlBody").textContent = j.yaml;
-        openModal("agentYamlModal");
-    } catch (e) { console.error(e); }
-}
-
-/* --- WEBSOCKETS (FIXED RECONNECTION) --- */
-
-function initLiveEvents() {
-    const eventsBox = document.getElementById("liveEvents");
-
-    // Clean up existing socket before creating a new one
-    if (wsEvents) {
-        wsEvents.onclose = null; // Prevent the close listener from firing a retry
-        wsEvents.close();
-    }
-
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsurl = `${protocol}//${location.host}/api/v1/ws/events`;
-
-    try {
-        wsEvents = new WebSocket(wsurl);
-
-        wsEvents.onopen = () => console.log("✅ Live Events Connected");
-
-        wsEvents.onmessage = e => {
-            const ev = JSON.parse(e.data);
-            eventsBox.textContent += JSON.stringify(ev, null, 2) + "\n---\n";
-            eventsBox.scrollTop = eventsBox.scrollHeight;
-            if (eventsBox.textContent.length > 50000) eventsBox.textContent = eventsBox.textContent.slice(-25000);
-        };
-
-        wsEvents.onclose = () => {
-            console.warn("⚠️ Live Events Closed. Reconnecting in 5s...");
-            setTimeout(initLiveEvents, 5000);
-        };
-
-        wsEvents.onerror = (err) => console.error("❌ Live Events Error");
-
-    } catch (error) {
-        console.error('WS Setup Error:', error);
-    }
-}
-
-function connectRunWs() {
-    const runId = document.getElementById("runIdInput").value;
-    const box = document.getElementById("runEvents");
-    if (!runId) return alert("Enter run_id");
-
-    if (runWs) runWs.close();
-    box.textContent = `Connecting to Run ${runId}...\n`;
-
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    runWs = new WebSocket(`${protocol}//${location.host}/api/v1/ws/replay/${runId}`);
-
-    runWs.onopen = () => box.textContent = `✅ Connected: ${runId}\n---\n`;
-    runWs.onmessage = e => {
-        box.textContent += JSON.stringify(JSON.parse(e.data)) + "\n---\n";
-        box.scrollTop = box.scrollHeight;
-    };
-    runWs.onerror = () => box.textContent += "\n❌ Error: Connection failed.";
-}
-
-/* --- DOWNLOAD & CLEAR --- */
-
-function downloadContent(id, name) {
-    const content = document.getElementById(id).textContent;
-    if (!content) return;
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
-    a.download = name;
-    a.click();
-}
-
-function clearBox(id) {
-    const box = document.getElementById(id);
-    if (box) box.textContent = (id === 'runEvents') ? "Logs cleared. Ready...\n" : "";
-}
-
-function downloadLogsCSV() {
-    if (!allLogs.length) return;
-    let csv = "Timestamp,Level,Logger,Message\n" + allLogs.map(l => `"${l.timestamp}","${l.level}","${l.logger}","${l.message.replace(/"/g, '""')}"`).join("\n");
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    a.download = "logs.csv";
-    a.click();
-}
-
-/* --- SHARED FILES --- */
-
-async function loadInputFiles() {
-    const listContainer = document.getElementById('inputFilesList');
-    try {
-        const data = await apiFetch('/api/v1/fs/shared');
-        const files = data.files || [];
-
-        if (files.length > 0) {
-            listContainer.innerHTML = files.map(file => {
-                const dateStr = new Date(file.modified * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-                return `
-                <div class="list-item">
-                    <div style="flex: 1;">
-                        <div class="list-item-name">📄 ${file.path}</div>
-                        <div class="list-item-id">${(file.size / 1024).toFixed(1)} KB • ${dateStr}</div>
-                    </div>
-                    <button class="action-btn" onclick="window.location.href='/api/v1/fs/shared/download?path=' + encodeURIComponent('${file.path}')">⬇️</button>
-                </div>`;
-            }).join('');
-        } else {
-            listContainer.innerHTML = '<div class="empty-state">No input files found</div>';
-        }
-        applyFilter('inputFilesList'); // Apply search persistence
-    } catch (e) { console.error(e); }
-}
-
-/* --- SEARCH FILTER LOGIC --- */
-
-function filterCardList(listId, query) {
-    activeFilters[listId] = query.toLowerCase();
-    applyFilter(listId);
-}
-
-function applyFilter(listId) {
-    const container = document.getElementById(listId);
-    if (!container) return;
-    const items = container.getElementsByClassName('list-item');
-    const term = activeFilters[listId] || "";
-
-    Array.from(items).forEach(item => {
-        item.style.display = item.textContent.toLowerCase().includes(term) ? "" : "none";
-    });
-}
-
-/* --- INITIALIZATION --- */
-
-function init() {
-    loadTheme();
-    loadState();
-    loadLogs();
-    loadInputFiles();
-    initLiveEvents();
-
-    updateInterval = setInterval(() => {
-        loadState();
-        loadInputFiles();
-    }, 30000);
-}
-
-init();
+
+/* ========================================
+   AUTHENTICATION & SESSION MANAGEMENT
+   ======================================== */
+
+   const DASHBOARD_HEADER = "TreehopperDash";
+
+   // Check if user is authenticated
+   function checkAuth() {
+       const token = localStorage.getItem('access_token');
+       const role = localStorage.getItem('user_role');
+
+       if (!token) {
+           // Not authenticated, redirect to login
+           window.location.href = '/';
+           return false;
+       }
+
+       // Show/hide admin tab based on role
+       if (role === 'admin') {
+           const usersTab = document.getElementById('usersTab');
+           if (usersTab) {
+               usersTab.style.display = 'flex';
+           }
+       }
+
+       return true;
+   }
+
+   // Get auth headers for API calls
+   function getAuthHeaders() {
+       return {
+           'Content-Type': 'application/json',
+           'x-requested-with': DASHBOARD_HEADER,
+           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+       };
+   }
+
+   // Logout function
+   function logout() {
+       if (confirm('Are you sure you want to logout?')) {
+           localStorage.removeItem('access_token');
+           localStorage.removeItem('user_role');
+           localStorage.removeItem('username');
+           localStorage.removeItem('activeTab');
+           window.location.href = '/';
+       }
+   }
+
+   // Make logout available globally
+   window.logout = logout;
+
+   // User Management Variables
+   let allUsers = [];
+
+   /* ========================================
+      TAB NAVIGATION (Define first for inline onclick)
+      ======================================== */
+
+   function switchTab(tabName) {
+       // Hide all tab contents
+       document.querySelectorAll('.tab-content').forEach(tab => {
+           tab.classList.remove('active');
+       });
+
+       // Remove active class from all tab buttons
+       document.querySelectorAll('.tab-btn').forEach(btn => {
+           btn.classList.remove('active');
+       });
+
+       // Show selected tab content
+       const selectedTab = document.getElementById(`tab-${tabName}`);
+       if (selectedTab) {
+           selectedTab.classList.add('active');
+       }
+
+       // Add active class to clicked button
+       const selectedBtn = document.querySelector(`[data-tab="${tabName}"]`);
+       if (selectedBtn) {
+           selectedBtn.classList.add('active');
+       }
+
+       // If switching to analytics, reload charts to ensure proper rendering
+       if (tabName === 'analytics') {
+           setTimeout(() => {
+               if (typeof loadAnalytics === 'function') {
+                   loadAnalytics();
+               }
+           }, 100);
+       }
+
+       // Save active tab to localStorage
+       localStorage.setItem('activeTab', tabName);
+   }
+
+   // Load saved tab on page load
+   function loadSavedTab() {
+       const savedTab = localStorage.getItem('activeTab') || 'overview';
+       switchTab(savedTab);
+   }
+
+   // Make functions globally available for inline onclick handlers
+   window.switchTab = switchTab;
+   window.loadSavedTab = loadSavedTab;
+
+   /* ========================================
+      GLOBAL VARIABLES
+      ======================================== */
+
+   // Core variables
+   let updateInterval;
+   let allLogs = [];
+   let runWs;
+   let wsEvents;
+   let currentPage = 1;
+   const logsPerPage = 50;
+   const maxPages = 10;
+
+   let activeFilters = {
+       agentsList: "",
+       chainsList: "",
+       pidsList: "",
+       inputFilesList: ""
+   };
+
+   // Graphviz variables
+   let graphvizInstance = null;
+   let currentZoom = null;
+
+   // Analytics variables
+   let charts = {};
+   let currentTimeWindow = '24h';
+
+   // Color schemes for analytics
+   const COLORS = {
+       dark: {
+           primary: ['#10b981', '#34d399', '#6ee7b7', '#a7f3d0', '#d1fae5'],
+           success: '#10b981',
+           error: '#ef4444',
+           warning: '#f59e0b',
+           info: '#3b82f6',
+           purple: '#a78bfa',
+           gridColor: 'rgba(148, 163, 184, 0.1)',
+           textColor: '#e2e8f0',
+           subTextColor: '#94a3b8'
+       },
+       light: {
+           primary: ['#059669', '#10b981', '#34d399', '#6ee7b7', '#a7f3d0'],
+           success: '#059669',
+           error: '#dc2626',
+           warning: '#d97706',
+           info: '#2563eb',
+           purple: '#7c3aed',
+           gridColor: 'rgba(148, 163, 184, 0.2)',
+           textColor: '#1e293b',
+           subTextColor: '#64748b'
+       }
+   };
+
+   function getColorScheme() {
+       return document.body.classList.contains('light-mode') ? COLORS.light : COLORS.dark;
+   }
+
+   /* ========================================
+      API HELPER
+      ======================================== */
+
+   async function apiFetch(url, options = {}) {
+       const defaultOptions = {
+           headers: getAuthHeaders()
+       };
+
+       const mergedOptions = {
+           ...defaultOptions,
+           ...options,
+           headers: {
+               ...defaultOptions.headers,
+               ...(options.headers || {})
+           }
+       };
+
+       const response = await fetch(url, mergedOptions);
+
+       // Handle 401 - Unauthorized (token expired or invalid)
+       if (response.status === 401) {
+           alert('Session expired. Please login again.');
+           logout();
+           return;
+       }
+
+       if (!response.ok) {
+           throw new Error(`API Error: ${response.status}`);
+       }
+
+       return response.json();
+   }
+
+   /* ========================================
+      UI HELPERS
+      ======================================== */
+
+   function toggleMenu() {
+       document.getElementById('dropdownMenu').classList.toggle('active');
+   }
+
+   document.addEventListener('click', (e) => {
+       const menu = document.getElementById('dropdownMenu');
+       const burger = document.querySelector('.hamburger-btn');
+       if (menu && !menu.contains(e.target) && !burger.contains(e.target)) {
+           menu.classList.remove('active');
+       }
+   });
+
+   function openModal(id) {
+       document.getElementById(id).style.display = "block";
+       document.getElementById('dropdownMenu').classList.remove('active');
+   }
+
+   function closeModal(modalId) {
+       const modal = document.getElementById(modalId);
+       if (modal) {
+         modal.style.display = "none";
+
+         // Clean up graphviz instance if closing chain flow modal
+         if (modalId === 'chainFlowModal') {
+           document.getElementById("chainFlowBody").innerHTML = '';
+           graphvizInstance = null;
+           currentZoom = null;
+         }
+       }
+   }
+
+   window.onclick = (e) => {
+       if (e.target.classList.contains('modal')) e.target.style.display = "none";
+   }
+
+   /* ========================================
+      THEME MANAGEMENT
+      ======================================== */
+
+   function toggleTheme() {
+       const isLight = document.body.classList.toggle('light-mode');
+       document.getElementById('themeIcon').textContent = isLight ? '🌙' : '☀️';
+       localStorage.setItem('theme', isLight ? 'light' : 'dark');
+
+       // Reload analytics charts with new color scheme
+       setTimeout(() => {
+           if (typeof loadAnalytics === 'function') {
+               loadAnalytics();
+           }
+       }, 100);
+   }
+
+   function loadTheme() {
+       if (localStorage.getItem('theme') === 'light') {
+           document.body.classList.add('light-mode');
+           document.getElementById('themeIcon').textContent = '🌙';
+       }
+   }
+
+   /* ========================================
+      TIMESTAMP FORMATTING
+      ======================================== */
+
+   function formatTimestamp(ts) {
+       if (!ts || ts === 'N/A') return 'N/A';
+
+       try {
+           // Check if ts is a Unix timestamp (number)
+           if (typeof ts === 'number') {
+               const date = new Date(ts * 1000);
+               return date.toLocaleString('en-US', {
+                   year: 'numeric',
+                   month: '2-digit',
+                   day: '2-digit',
+                   hour: '2-digit',
+                   minute: '2-digit',
+                   second: '2-digit',
+                   hour12: false
+               });
+           }
+
+           // Check if ts is a string that looks like a Unix timestamp
+           if (typeof ts === 'string' && /^\d+$/.test(ts)) {
+               const timestamp = parseInt(ts);
+               const date = timestamp > 9999999999
+                   ? new Date(timestamp)
+                   : new Date(timestamp * 1000);
+               return date.toLocaleString('en-US', {
+                   year: 'numeric',
+                   month: '2-digit',
+                   day: '2-digit',
+                   hour: '2-digit',
+                   minute: '2-digit',
+                   second: '2-digit',
+                   hour12: false
+               });
+           }
+
+           // Try to parse as ISO date string
+           const date = new Date(ts);
+           if (!isNaN(date.getTime())) {
+               return date.toLocaleString('en-US', {
+                   year: 'numeric',
+                   month: '2-digit',
+                   day: '2-digit',
+                   hour: '2-digit',
+                   minute: '2-digit',
+                   second: '2-digit',
+                   hour12: false
+               });
+           }
+
+           return ts;
+       } catch (e) {
+           console.error('Error formatting timestamp:', e, ts);
+           return ts;
+       }
+   }
+
+   /* ========================================
+      DATA LOADING
+      ======================================== */
+
+   async function loadState() {
+       try {
+           const data = await apiFetch('/api/state');
+           const statusText = document.getElementById('statusText');
+           const statusMonitor = document.getElementById('liveStatus');
+           statusText.textContent = 'Online';
+           statusMonitor.classList.add('online');
+
+           // Update agents
+           const agentsList = document.getElementById('agentsList');
+           if (data.agents?.length > 0) {
+               agentsList.innerHTML = data.agents.map(agent => `
+                   <div class="list-item">
+                       <div style="flex: 1;">
+                           <div class="list-item-name">${agent.name || 'Unknown'}</div>
+                           <div class="list-item-id">${agent.id || 'N/A'}</div>
+                       </div>
+                       <button class="action-btn icon-btn" onclick="showAgentYaml('${agent.name}')" title="YAML">📄</button>
+                   </div>
+               `).join('');
+               document.getElementById('agentCount').textContent = data.agents.length;
+           } else {
+               agentsList.innerHTML = '<div class="empty-state">No agents found</div>';
+               document.getElementById('agentCount').textContent = '0';
+           }
+
+           // Update chains
+           const chainsList = document.getElementById('chainsList');
+           if (data.chains?.length > 0) {
+               chainsList.innerHTML = data.chains.map(chain => `
+                   <div class="list-item">
+                       <div style="flex: 1;">
+                           <div class="list-item-name">${chain.name || 'Unknown'}</div>
+                           <div class="list-item-id">${chain.id || 'N/A'}</div>
+                       </div>
+                       <div class="item-actions">
+                           <button class="action-btn icon-btn"
+                                   onclick="showChainYaml('${chain.name}')"
+                                   title="YAML">📄</button>
+                           <button class="action-btn icon-btn"
+                                   onclick="showChainFlow('${chain.name}')"
+                                   title="Flow">🌿</button>
+                           <button class="action-btn icon-btn"
+                                   onclick="showLastRun('${chain.name}')"
+                                   title="Last Run">⏱️</button>
+                       </div>
+                   </div>
+               `).join('');
+               document.getElementById('chainCount').textContent = data.chains.length;
+           } else {
+               chainsList.innerHTML = '<div class="empty-state">No chains found</div>';
+               document.getElementById('chainCount').textContent = '0';
+           }
+
+           // Update PIDs
+           const pidsList = document.getElementById('pidsList');
+           const pEntries = Object.entries(data.pids || {});
+           if (pEntries.length > 0) {
+               pidsList.innerHTML = pEntries.map(([name, pid]) => `
+                   <div class="list-item">
+                       <div style="flex:1">
+                           <div class="list-item-name">⚙️ ${name}</div>
+                           <div class="list-item-id">PID: ${pid}</div>
+                       </div>
+                   </div>
+               `).join('');
+               document.getElementById('pidCount').textContent = pEntries.length;
+           } else {
+               pidsList.innerHTML = '<div class="empty-state">No processes found</div>';
+               document.getElementById('pidCount').textContent = '0';
+           }
+
+           // Re-apply filters after content update
+           applyFilter('agentsList');
+           applyFilter('chainsList');
+           applyFilter('pidsList');
+
+       } catch (error) {
+           console.error('Error loading state:', error);
+           const statusText = document.getElementById('statusText');
+           const statusMonitor = document.getElementById('liveStatus');
+           statusText.textContent = 'Error';
+           statusMonitor.classList.remove('online');
+       }
+   }
+
+   /* ========================================
+      LOGGING SYSTEM
+      ======================================== */
+
+   function renderLogs(logs) {
+       const logsContainer = document.getElementById('logsContainer');
+       const paginationContainer = document.getElementById('logPagination');
+
+       if (!logs?.length) {
+           logsContainer.innerHTML = '<div class="no-results">No logs match your search</div>';
+           paginationContainer.innerHTML = '';
+           return;
+       }
+
+       const totalLogs = logs.length;
+       const totalPages = Math.min(Math.ceil(totalLogs / logsPerPage), maxPages);
+
+       if (currentPage > totalPages) currentPage = totalPages;
+       if (currentPage < 1) currentPage = 1;
+
+       const startIndex = (currentPage - 1) * logsPerPage;
+       const endIndex = startIndex + logsPerPage;
+       const paginatedLogs = logs.slice(startIndex, endIndex);
+
+       let tableHTML = `<table class="log-table"><thead><tr><th>Timestamp</th><th>Level</th><th>Logger</th><th>Message</th></tr></thead><tbody>`;
+       paginatedLogs.forEach(log => {
+           const levelClass = (log.level || '').toLowerCase();
+           const timestamp = formatTimestamp(log.ts);
+           const level = log.level || 'N/A';
+           const logger = log.logger || 'N/A';
+           const message = log.msg || 'N/A';
+
+           tableHTML += `
+             <tr class="${['error', 'warning', 'success'].includes(levelClass) ? levelClass : ''}">
+               <td class="log-timestamp">${timestamp}</td>
+               <td class="log-level ${levelClass}">${level}</td>
+               <td class="log-logger">${logger}</td>
+               <td class="log-message">${message}</td>
+             </tr>`;
+       });
+       tableHTML += `</tbody></table>`;
+       logsContainer.innerHTML = tableHTML;
+
+       let paginationHTML = `
+         <button onclick="currentPage=1; renderLogs(allLogs)" ${currentPage === 1 ? 'disabled' : ''}>First</button>
+         <button onclick="currentPage--; renderLogs(allLogs)" ${currentPage === 1 ? 'disabled' : ''}>Previous</button>
+         <span>Page ${currentPage} of ${totalPages}</span>
+         <button onclick="currentPage++; renderLogs(allLogs)" ${currentPage === totalPages ? 'disabled' : ''}>Next</button>
+         <button onclick="currentPage=${totalPages}; renderLogs(allLogs)" ${currentPage === totalPages ? 'disabled' : ''}>Last</button>
+       `;
+       paginationContainer.innerHTML = paginationHTML;
+   }
+
+   async function loadLogs() {
+       try {
+           allLogs = await apiFetch('/api/logs');
+           renderLogs(allLogs);
+       } catch (e) { console.error(e); }
+   }
+
+   function filterLogs() {
+       const query = document.getElementById('logSearch').value.toLowerCase();
+       if (!query) {
+           currentPage = 1;
+           renderLogs(allLogs);
+           return;
+       }
+
+       const filtered = allLogs.filter(log => {
+           const formattedTs = formatTimestamp(log.ts);
+           const rawTs = String(log.ts || '');
+
+           return (formattedTs.toLowerCase().includes(query) ||
+                   rawTs.toLowerCase().includes(query) ||
+                   (log.level || '').toLowerCase().includes(query) ||
+                   (log.logger || '').toLowerCase().includes(query) ||
+                   (log.msg || '').toLowerCase().includes(query));
+       });
+       currentPage = 1;
+       renderLogs(filtered);
+   }
+
+   /* ========================================
+      ANALYTICS DASHBOARD
+      ======================================== */
+
+   function changeTimeWindow(window) {
+       currentTimeWindow = window;
+
+       document.querySelectorAll('.window-btn').forEach(btn => {
+           btn.classList.remove('active');
+           if (btn.dataset.window === window) {
+               btn.classList.add('active');
+           }
+       });
+
+       loadAnalytics();
+   }
+
+   async function loadAnalytics() {
+       try {
+           const data = await apiFetch(`/api/v1/summary?window=${currentTimeWindow}`);
+
+           updateKPIs(data);
+           renderEventsPieChart(data.events.by_type);
+           renderFilesPieChart(data.files.by_extension);
+           renderRunsDonutChart(data.runs);
+           renderChainsBarChart(data.chains.by_chain);
+           renderAgentsBarChart(data.agents.invocations);
+           renderTimelineChart(data.timeline.runs_per_hour);
+
+       } catch (e) {
+           console.error('Failed to load analytics:', e);
+       }
+   }
+
+   function updateKPIs(data) {
+       document.getElementById('kpi-total-runs').textContent = data.runs.total.toLocaleString();
+
+       document.getElementById('kpi-success-runs').textContent = data.runs.success.toLocaleString();
+       const successRate = data.runs.total > 0
+           ? Math.round((data.runs.success / data.runs.total) * 100)
+           : 0;
+       document.getElementById('kpi-success-rate').textContent = `${successRate}% success rate`;
+
+       document.getElementById('kpi-failed-runs').textContent = data.runs.failed.toLocaleString();
+       const errorCount = data.events.by_type.error || 0;
+       document.getElementById('kpi-error-count').textContent = `${errorCount} total errors`;
+
+       document.getElementById('kpi-file-count').textContent = data.files.count.toLocaleString();
+       document.getElementById('kpi-file-size').textContent = `${data.files.total_size_mb} MB total`;
+   }
+
+   function destroyChart(chartId) {
+       if (charts[chartId]) {
+           charts[chartId].destroy();
+           delete charts[chartId];
+       }
+   }
+
+   function renderEventsPieChart(data) {
+       const chartId = 'eventsPieChart';
+       destroyChart(chartId);
+
+       if (!data || Object.keys(data).length === 0) {
+           document.getElementById(chartId).parentElement.innerHTML =
+               '<div class="chart-empty">No event data available</div>';
+           return;
+       }
+
+       const colors = getColorScheme();
+       const ctx = document.getElementById(chartId);
+
+       charts[chartId] = new Chart(ctx, {
+           type: 'pie',
+           data: {
+               labels: Object.keys(data),
+               datasets: [{
+                   data: Object.values(data),
+                   backgroundColor: colors.primary,
+                   borderWidth: 2,
+                   borderColor: colors.gridColor
+               }]
+           },
+           options: {
+               responsive: true,
+               maintainAspectRatio: true,
+               plugins: {
+                   legend: {
+                       position: 'bottom',
+                       labels: {
+                           color: colors.textColor,
+                           padding: 15,
+                           font: { size: 12 }
+                       }
+                   },
+                   tooltip: {
+                       backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                       titleColor: '#10b981',
+                       bodyColor: '#e2e8f0',
+                       borderColor: '#10b981',
+                       borderWidth: 1,
+                       padding: 12,
+                       cornerRadius: 8
+                   }
+               }
+           }
+       });
+   }
+
+   function renderFilesPieChart(data) {
+       const chartId = 'filesPieChart';
+       destroyChart(chartId);
+
+       if (!data || Object.keys(data).length === 0) {
+           document.getElementById(chartId).parentElement.innerHTML =
+               '<div class="chart-empty">No file data available</div>';
+           return;
+       }
+
+       const colors = getColorScheme();
+       const ctx = document.getElementById(chartId);
+
+       charts[chartId] = new Chart(ctx, {
+           type: 'pie',
+           data: {
+               labels: Object.keys(data),
+               datasets: [{
+                   data: Object.values(data),
+                   backgroundColor: colors.primary,
+                   borderWidth: 2,
+                   borderColor: colors.gridColor
+               }]
+           },
+           options: {
+               responsive: true,
+               maintainAspectRatio: true,
+               plugins: {
+                   legend: {
+                       position: 'bottom',
+                       labels: {
+                           color: colors.textColor,
+                           padding: 15,
+                           font: { size: 12 }
+                       }
+                   },
+                   tooltip: {
+                       backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                       titleColor: '#10b981',
+                       bodyColor: '#e2e8f0',
+                       borderColor: '#10b981',
+                       borderWidth: 1,
+                       padding: 12,
+                       cornerRadius: 8
+                   }
+               }
+           }
+       });
+   }
+
+   function renderRunsDonutChart(data) {
+       const chartId = 'runsDonutChart';
+       destroyChart(chartId);
+
+       if (!data || data.total === 0) {
+           document.getElementById(chartId).parentElement.innerHTML =
+               '<div class="chart-empty">No run data available</div>';
+           return;
+       }
+
+       const colors = getColorScheme();
+       const ctx = document.getElementById(chartId);
+
+       charts[chartId] = new Chart(ctx, {
+           type: 'doughnut',
+           data: {
+               labels: ['Success', 'Failed'],
+               datasets: [{
+                   data: [data.success, data.failed],
+                   backgroundColor: [colors.success, colors.error],
+                   borderWidth: 2,
+                   borderColor: colors.gridColor
+               }]
+           },
+           options: {
+               responsive: true,
+               maintainAspectRatio: true,
+               plugins: {
+                   legend: {
+                       position: 'bottom',
+                       labels: {
+                           color: colors.textColor,
+                           padding: 15,
+                           font: { size: 12 }
+                       }
+                   },
+                   tooltip: {
+                       backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                       titleColor: '#10b981',
+                       bodyColor: '#e2e8f0',
+                       borderColor: '#10b981',
+                       borderWidth: 1,
+                       padding: 12,
+                       cornerRadius: 8,
+                       callbacks: {
+                           label: function(context) {
+                               const total = data.total;
+                               const value = context.parsed;
+                               const percentage = Math.round((value / total) * 100);
+                               return `${context.label}: ${value} (${percentage}%)`;
+                           }
+                       }
+                   }
+               }
+           }
+       });
+   }
+
+   function renderChainsBarChart(data) {
+       const chartId = 'chainsBarChart';
+       destroyChart(chartId);
+
+       if (!data || Object.keys(data).length === 0) {
+           document.getElementById(chartId).parentElement.innerHTML =
+               '<div class="chart-empty">No chain data available</div>';
+           return;
+       }
+
+       const colors = getColorScheme();
+       const ctx = document.getElementById(chartId);
+
+       const sorted = Object.entries(data).sort((a, b) => b[1] - a[1]);
+       const labels = sorted.map(([name]) => name);
+       const values = sorted.map(([, count]) => count);
+
+       charts[chartId] = new Chart(ctx, {
+           type: 'bar',
+           data: {
+               labels: labels,
+               datasets: [{
+                   label: 'Invocations',
+                   data: values,
+                   backgroundColor: colors.primary[1],
+                   borderColor: colors.primary[0],
+                   borderWidth: 2,
+                   borderRadius: 6
+               }]
+           },
+           options: {
+               responsive: true,
+               maintainAspectRatio: true,
+               indexAxis: 'y',
+               plugins: {
+                   legend: { display: false },
+                   tooltip: {
+                       backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                       titleColor: '#10b981',
+                       bodyColor: '#e2e8f0',
+                       borderColor: '#10b981',
+                       borderWidth: 1,
+                       padding: 12,
+                       cornerRadius: 8
+                   }
+               },
+               scales: {
+                   x: {
+                       grid: { color: colors.gridColor },
+                       ticks: { color: colors.subTextColor }
+                   },
+                   y: {
+                       grid: { display: false },
+                       ticks: { color: colors.textColor, font: { size: 12 } }
+                   }
+               }
+           }
+       });
+   }
+
+   function renderAgentsBarChart(data) {
+       const chartId = 'agentsBarChart';
+       destroyChart(chartId);
+
+       if (!data || Object.keys(data).length === 0) {
+           document.getElementById(chartId).parentElement.innerHTML =
+               '<div class="chart-empty">No agent data available</div>';
+           return;
+       }
+
+       const colors = getColorScheme();
+       const ctx = document.getElementById(chartId);
+
+       const sorted = Object.entries(data).sort((a, b) => b[1] - a[1]);
+       const labels = sorted.map(([name]) => name);
+       const values = sorted.map(([, count]) => count);
+
+       charts[chartId] = new Chart(ctx, {
+           type: 'bar',
+           data: {
+               labels: labels,
+               datasets: [{
+                   label: 'Invocations',
+                   data: values,
+                   backgroundColor: colors.primary[2],
+                   borderColor: colors.primary[0],
+                   borderWidth: 2,
+                   borderRadius: 6
+               }]
+           },
+           options: {
+               responsive: true,
+               maintainAspectRatio: true,
+               indexAxis: 'y',
+               plugins: {
+                   legend: { display: false },
+                   tooltip: {
+                       backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                       titleColor: '#10b981',
+                       bodyColor: '#e2e8f0',
+                       borderColor: '#10b981',
+                       borderWidth: 1,
+                       padding: 12,
+                       cornerRadius: 8
+                   }
+               },
+               scales: {
+                   x: {
+                       grid: { color: colors.gridColor },
+                       ticks: { color: colors.subTextColor }
+                   },
+                   y: {
+                       grid: { display: false },
+                       ticks: { color: colors.textColor, font: { size: 12 } }
+                   }
+               }
+           }
+       });
+   }
+
+   function renderTimelineChart(data) {
+       const chartId = 'timelineChart';
+       destroyChart(chartId);
+
+       if (!data || data.length === 0) {
+           document.getElementById(chartId).parentElement.innerHTML =
+               '<div class="chart-empty">No timeline data available</div>';
+           return;
+       }
+
+       const colors = getColorScheme();
+       const ctx = document.getElementById(chartId);
+
+       const labels = data.map(d => d.hour);
+       const values = data.map(d => d.count);
+
+       charts[chartId] = new Chart(ctx, {
+           type: 'line',
+           data: {
+               labels: labels,
+               datasets: [{
+                   label: 'Runs per Hour',
+                   data: values,
+                   borderColor: colors.primary[0],
+                   backgroundColor: colors.primary[0] + '33',
+                   borderWidth: 3,
+                   fill: true,
+                   tension: 0.4,
+                   pointRadius: 5,
+                   pointBackgroundColor: colors.primary[0],
+                   pointBorderColor: colors.textColor,
+                   pointBorderWidth: 2,
+                   pointHoverRadius: 7
+               }]
+           },
+           options: {
+               responsive: true,
+               maintainAspectRatio: true,
+               plugins: {
+                   legend: { display: false },
+                   tooltip: {
+                       backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                       titleColor: '#10b981',
+                       bodyColor: '#e2e8f0',
+                       borderColor: '#10b981',
+                       borderWidth: 1,
+                       padding: 12,
+                       cornerRadius: 8
+                   }
+               },
+               scales: {
+                   x: {
+                       grid: { color: colors.gridColor },
+                       ticks: { color: colors.subTextColor }
+                   },
+                   y: {
+                       grid: { color: colors.gridColor },
+                       ticks: {
+                           color: colors.subTextColor,
+                           stepSize: 1
+                       },
+                       beginAtZero: true
+                   }
+               }
+           }
+       });
+   }
+
+   /* ========================================
+      CHAIN FLOW VISUALIZATION
+      ======================================== */
+
+   function checkGraphvizLibraries() {
+       console.log('=== D3/Graphviz Library Diagnostic ===');
+       console.log('D3 loaded:', typeof d3 !== 'undefined');
+       if (typeof d3 !== 'undefined') {
+           console.log('D3 version:', d3.version);
+           console.log('d3.select:', typeof d3.select);
+           console.log('d3.graphviz:', typeof d3.graphviz);
+
+           try {
+               const test = d3.select('body');
+               console.log('d3.select().graphviz:', typeof test.graphviz);
+           } catch (e) {
+               console.error('Error creating d3 selection:', e);
+           }
+       }
+
+       console.log('@hpcc-js/wasm loaded:', typeof window['@hpcc-js/wasm'] !== 'undefined');
+       console.log('window.d3 exists:', typeof window.d3 !== 'undefined');
+       console.log('===================================');
+   }
+
+   window.checkGraphvizLibraries = checkGraphvizLibraries;
+
+   function zoomIn() {
+       if (currentZoom) {
+           const svg = d3.select('#chainFlowBody svg');
+           if (svg.node()) {
+               svg.transition()
+                   .duration(300)
+                   .call(currentZoom.scaleBy, 1.3);
+           }
+       }
+   }
+
+   function zoomOut() {
+       if (currentZoom) {
+           const svg = d3.select('#chainFlowBody svg');
+           if (svg.node()) {
+               svg.transition()
+                   .duration(300)
+                   .call(currentZoom.scaleBy, 0.7);
+           }
+       }
+   }
+
+   function resetZoom() {
+       if (currentZoom && graphvizInstance) {
+           const svg = d3.select('#chainFlowBody svg');
+           const container = document.getElementById("chainFlowBody");
+           if (svg.node() && container) {
+               const g = svg.select("g");
+               if (g.node()) {
+                   try {
+                       const bbox = g.node().getBBox();
+                       const centerX = (container.clientWidth - bbox.width * 0.9) / 2;
+                       const centerY = (container.clientHeight - bbox.height * 0.9) / 2;
+
+                       const resetTransform = d3.zoomIdentity
+                           .translate(centerX, centerY)
+                           .scale(0.9);
+
+                       svg.transition()
+                           .duration(500)
+                           .call(currentZoom.transform, resetTransform);
+                   } catch (e) {
+                       svg.transition()
+                           .duration(500)
+                           .call(currentZoom.transform, d3.zoomIdentity);
+                   }
+               }
+           }
+       }
+   }
+
+   async function showChainFlow(name) {
+       document.getElementById("chainFlowTitle").innerText = `${name} - Flow Diagram`;
+
+       try {
+           const data = await apiFetch(`/api/v1/chains/${name}/flow`);
+
+           if (!data.dot) {
+               throw new Error('No flow data available for this chain');
+           }
+
+           const container = document.getElementById("chainFlowBody");
+           container.innerHTML = '<div class="loading-indicator">🔄 Rendering flow diagram...</div>';
+
+           openModal('chainFlowModal');
+           await new Promise(resolve => setTimeout(resolve, 300));
+
+           if (typeof d3 === 'undefined') {
+               throw new Error('D3.js library not loaded. Please check console and refresh the page.');
+           }
+
+           console.log('D3 version:', d3.version);
+           console.log('d3.graphviz type:', typeof d3.graphviz);
+           console.log('d3.select type:', typeof d3.select);
+
+           try {
+               const testSelection = d3.select("body");
+               if (typeof testSelection.graphviz !== 'function') {
+                   throw new Error('d3-graphviz not properly loaded.');
+               }
+               console.log('d3-graphviz is available on selections');
+           } catch (checkError) {
+               console.error('Graphviz check error:', checkError);
+               throw new Error('d3-graphviz not available. Please ensure all libraries loaded.');
+           }
+
+           container.innerHTML = '';
+
+           try {
+               graphvizInstance = d3.select("#chainFlowBody")
+                   .graphviz()
+                   .fit(true)
+                   .zoom(true)
+                   .scale(0.9)
+                   .width(container.clientWidth || 800)
+                   .height(container.clientHeight || 600)
+                   .engine("dot")
+                   .transition(() => d3.transition().duration(500))
+                   .on("end", () => {
+                       try {
+                           const svg = d3.select("#chainFlowBody svg");
+
+                           if (!svg.node()) {
+                               console.error('SVG not found after rendering');
+                               return;
+                           }
+
+                           // Force white text in light mode
+                           if (document.body.classList.contains('light-mode')) {
+                               svg.selectAll('.node text').each(function() {
+                                   d3.select(this)
+                                       .attr('fill', '#ffffff')
+                                       .attr('style', 'fill: #ffffff !important; font-weight: 700 !important;');
+                               });
+                           }
+
+                           const zoom = d3.zoom()
+                               .scaleExtent([0.1, 4])
+                               .on("zoom", (event) => {
+                                   const g = svg.select("g");
+                                   if (g.node()) {
+                                       g.attr("transform", event.transform);
+                                   }
+                               });
+
+                           svg.call(zoom);
+                           currentZoom = zoom;
+
+                           svg.on("wheel", (event) => {
+                               event.preventDefault();
+                           });
+
+                           const g = svg.select("g");
+                           if (g.node()) {
+                               try {
+                                   const bbox = g.node().getBBox();
+                                   const centerX = (container.clientWidth - bbox.width * 0.9) / 2;
+                                   const centerY = (container.clientHeight - bbox.height * 0.9) / 2;
+
+                                   const initialTransform = d3.zoomIdentity
+                                       .translate(centerX, centerY)
+                                       .scale(0.9);
+
+                                   svg.call(zoom.transform, initialTransform);
+                               } catch (bboxError) {
+                                   console.warn('Could not center graph:', bboxError);
+                               }
+                           }
+                       } catch (zoomError) {
+                           console.error('Zoom setup error:', zoomError);
+                       }
+                   });
+
+               console.log('Rendering DOT for chain:', name);
+               graphvizInstance.renderDot(data.dot);
+
+           } catch (renderError) {
+               console.error('Graphviz render error:', renderError);
+               container.innerHTML =
+                   `<div class="error-message">❌ Failed to render diagram: ${renderError.message}</div>`;
+           }
+
+       } catch (e) {
+           console.error('Chain flow error:', e);
+           const container = document.getElementById("chainFlowBody");
+           if (container) {
+               container.innerHTML =
+                   `<div class="error-message">❌ ${e.message}<br><br>Chain: ${name}</div>`;
+           }
+           openModal('chainFlowModal');
+       }
+   }
+
+   document.addEventListener('keydown', function(e) {
+       const modal = document.getElementById('chainFlowModal');
+       if (modal && modal.style.display === 'block') {
+           if (e.key === '+' || e.key === '=') {
+               zoomIn();
+               e.preventDefault();
+           } else if (e.key === '-' || e.key === '_') {
+               zoomOut();
+               e.preventDefault();
+           } else if (e.key === '0') {
+               resetZoom();
+               e.preventDefault();
+           }
+       }
+   });
+
+   /* ========================================
+      MODALS
+      ======================================== */
+
+   async function showChainYaml(name) {
+       try {
+           const j = await apiFetch(`/api/v1/chains/${name}/yaml`);
+           document.getElementById("chainYamlTitle").innerText = name;
+           document.getElementById("chainYamlBody").textContent = j.yaml;
+           openModal("chainYamlModal");
+       } catch (e) { console.error(e); }
+   }
+
+   async function showLastRun(name) {
+       try {
+           const j = await apiFetch(`/api/v1/chains/${name}/lastrun`);
+           document.getElementById("lastRunTitle").innerText = name;
+           document.getElementById("lastRunBody").textContent = JSON.stringify(j, null, 2);
+           openModal('lastRunModal');
+       } catch (e) {
+           console.error('Last run error:', e);
+           if (e.message.includes('404')) {
+               alert(`No run history available for chain: ${name}\n\nThis chain hasn't been executed yet or the run history file is missing.`);
+           } else {
+               alert(`Failed to load run history for: ${name}\n\nError: ${e.message}`);
+           }
+       }
+   }
+
+   async function showAgentYaml(name) {
+       try {
+           const j = await apiFetch(`/api/v1/agents/${name}/yaml`);
+           document.getElementById("agentYamlTitle").innerText = name;
+           document.getElementById("agentYamlBody").textContent = j.yaml;
+           openModal("agentYamlModal");
+       } catch (e) { console.error(e); }
+   }
+
+   async function showSubscription() {
+       try {
+           const data = await apiFetch(`/api/v1/sys/subscription`);
+
+           const subscriptionId = data.subscription_id || 'N/A';
+           const createdAt = data.created_at ? formatTimestamp(data.created_at) : 'N/A';
+
+           const formattedContent = `Subscription ID: ${subscriptionId}
+
+   Created At: ${createdAt}
+
+   Status: Active ✓`;
+
+           document.getElementById("subscriptionContent").textContent = formattedContent;
+           openModal("subscriptionModal");
+       } catch (e) {
+           console.error('Subscription error:', e);
+           document.getElementById("subscriptionContent").textContent = `Error loading subscription information.\n\n${e.message}`;
+           openModal("subscriptionModal");
+       }
+   }
+
+   /* ========================================
+      WEBSOCKETS
+      ======================================== */
+
+   function initLiveEvents() {
+       const eventsBox = document.getElementById("liveEvents");
+
+       if (wsEvents) {
+           wsEvents.onclose = null;
+           wsEvents.close();
+       }
+
+       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+       const wsurl = `${protocol}//${location.host}/api/v1/ws/events`;
+
+       try {
+           wsEvents = new WebSocket(wsurl);
+
+           wsEvents.onopen = () => console.log("✅ Live Events Connected");
+
+           wsEvents.onmessage = e => {
+               const ev = JSON.parse(e.data);
+               eventsBox.textContent += JSON.stringify(ev, null, 2) + "\n---\n";
+               eventsBox.scrollTop = eventsBox.scrollHeight;
+               if (eventsBox.textContent.length > 50000) eventsBox.textContent = eventsBox.textContent.slice(-25000);
+           };
+
+           wsEvents.onclose = () => {
+               console.warn("⚠️ Live Events Closed. Reconnecting in 5s...");
+               setTimeout(initLiveEvents, 5000);
+           };
+
+           wsEvents.onerror = (err) => console.error("❌ Live Events Error");
+
+       } catch (error) {
+           console.error('WS Setup Error:', error);
+       }
+   }
+
+   function connectRunWs() {
+       const runId = document.getElementById("runIdInput").value;
+       const box = document.getElementById("runEvents");
+       if (!runId) return alert("Enter run_id");
+
+       if (runWs) runWs.close();
+       box.textContent = `Connecting to Run ${runId}...\n`;
+
+       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+       runWs = new WebSocket(`${protocol}//${location.host}/api/v1/ws/replay/${runId}`);
+
+       runWs.onopen = () => box.textContent = `✅ Connected: ${runId}\n---\n`;
+       runWs.onmessage = e => {
+           box.textContent += JSON.stringify(JSON.parse(e.data)) + "\n---\n";
+           box.scrollTop = box.scrollHeight;
+       };
+       runWs.onerror = () => box.textContent += "\n❌ Error: Connection failed.";
+   }
+
+   /* ========================================
+      DOWNLOAD & UTILITIES
+      ======================================== */
+
+   function downloadContent(id, name) {
+       const content = document.getElementById(id).textContent;
+       if (!content) return;
+       const a = document.createElement('a');
+       a.href = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
+       a.download = name;
+       a.click();
+   }
+
+   function clearBox(id) {
+       const box = document.getElementById(id);
+       if (box) box.textContent = (id === 'runEvents') ? "Logs cleared. Ready...\n" : "";
+   }
+
+   function downloadLogsCSV() {
+       if (!allLogs.length) return;
+       let csv = "Timestamp,Level,Logger,Message\n" + allLogs.map(l => {
+           const timestamp = formatTimestamp(l.ts);
+           const level = l.level || 'N/A';
+           const logger = l.logger || 'N/A';
+           const message = (l.msg || 'N/A').replace(/"/g, '""');
+           return `"${timestamp}","${level}","${logger}","${message}"`;
+       }).join("\n");
+       const a = document.createElement('a');
+       a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+       a.download = "logs.csv";
+       a.click();
+   }
+
+   /* ========================================
+      SHARED FILES
+      ======================================== */
+
+   async function loadInputFiles() {
+       const listContainer = document.getElementById('inputFilesList');
+       try {
+           const data = await apiFetch('/api/v1/fs/shared');
+           const files = data.files || [];
+
+           if (files.length > 0) {
+               listContainer.innerHTML = files.map(file => {
+                   const dateStr = new Date(file.modified * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                   return `
+                   <div class="list-item">
+                       <div style="flex: 1;">
+                           <div class="list-item-name">📄 ${file.path}</div>
+                           <div class="list-item-id">${(file.size / 1024).toFixed(1)} KB • ${dateStr}</div>
+                       </div>
+                       <button class="action-btn" onclick="window.location.href='/api/v1/fs/shared/download?path=' + encodeURIComponent('${file.path}')">⬇️</button>
+                   </div>`;
+               }).join('');
+           } else {
+               listContainer.innerHTML = '<div class="empty-state">No input files found</div>';
+           }
+           applyFilter('inputFilesList');
+       } catch (e) { console.error(e); }
+   }
+
+   /* ========================================
+      SEARCH FILTERS
+      ======================================== */
+
+   function filterCardList(listId, query) {
+       activeFilters[listId] = query.toLowerCase();
+       applyFilter(listId);
+   }
+
+   function applyFilter(listId) {
+       const container = document.getElementById(listId);
+       if (!container) return;
+       const items = container.getElementsByClassName('list-item');
+       const term = activeFilters[listId] || "";
+
+       Array.from(items).forEach(item => {
+           item.style.display = item.textContent.toLowerCase().includes(term) ? "" : "none";
+       });
+   }
+
+   /* ========================================
+      USER MANAGEMENT (Admin Only)
+      ======================================== */
+
+   async function loadUsers() {
+       try {
+           const response = await fetch('/api/v1/users/list', {
+               headers: getAuthHeaders()
+           });
+
+           if (!response.ok) throw new Error('Failed to load users');
+
+           allUsers = await response.json();
+           renderUsers(allUsers);
+       } catch (e) {
+           console.error('Error loading users:', e);
+           document.getElementById('usersContainer').innerHTML =
+               '<div class="error-message">Failed to load users. ' + e.message + '</div>';
+       }
+   }
+
+   function renderUsers(users) {
+       const container = document.getElementById('usersContainer');
+
+       if (!users || users.length === 0) {
+           container.innerHTML = '<div class="empty-state">No users found</div>';
+           return;
+       }
+
+       let tableHTML = `
+           <table class="log-table">
+               <thead>
+                   <tr>
+                       <th>Username</th>
+                       <th>Role</th>
+                       <th>Created</th>
+                       <th>Actions</th>
+                   </tr>
+               </thead>
+               <tbody>
+       `;
+
+       users.forEach(user => {
+           const createdDate = new Date(user.created_at).toLocaleString('en-US', {
+               year: 'numeric',
+               month: 'short',
+               day: 'numeric',
+               hour: '2-digit',
+               minute: '2-digit'
+           });
+
+           const editBtn = `<button class="action-btn" onclick="showEditUserModal('${user.username}', '${user.role}')" title="Edit">✏️</button>`;
+
+           const deleteBtn = user.username === 'admin'
+               ? '<button class="action-btn" disabled title="Cannot delete admin">🔒</button>'
+               : `<button class="action-btn" onclick="deleteUser('${user.username}')" title="Delete">🗑️</button>`;
+
+           tableHTML += `
+               <tr>
+                   <td class="log-timestamp">${user.username}</td>
+                   <td class="log-level">${user.role}</td>
+                   <td class="log-logger">${createdDate}</td>
+                   <td>${editBtn} ${deleteBtn}</td>
+               </tr>
+           `;
+       });
+
+       tableHTML += `</tbody></table>`;
+       container.innerHTML = tableHTML;
+   }
+
+   function filterUsers() {
+       const query = document.getElementById('userSearch').value.toLowerCase();
+       if (!query) {
+           renderUsers(allUsers);
+           return;
+       }
+
+       const filtered = allUsers.filter(user =>
+           user.username.toLowerCase().includes(query) ||
+           user.role.toLowerCase().includes(query)
+       );
+
+       renderUsers(filtered);
+   }
+
+   function showAddUserModal() {
+       const username = prompt('Enter username:');
+       if (!username) return;
+
+       const password = prompt('Enter password:');
+       if (!password) return;
+
+       const role = prompt('Enter role (admin/developer):', 'developer');
+       if (!role || !['admin', 'developer'].includes(role)) {
+           alert('Invalid role. Must be "admin" or "developer"');
+           return;
+       }
+
+       addUser(username, password, role);
+   }
+
+   async function addUser(username, password, role) {
+       try {
+           const response = await fetch('/api/v1/users/add', {
+               method: 'POST',
+               headers: getAuthHeaders(),
+               body: JSON.stringify({ username, password, role })
+           });
+
+           if (!response.ok) {
+               const error = await response.json();
+               throw new Error(error.detail || 'Failed to add user');
+           }
+
+           alert(`User "${username}" created successfully!`);
+           loadUsers();
+       } catch (e) {
+           alert('Error adding user: ' + e.message);
+       }
+   }
+
+   async function deleteUser(username) {
+       if (!confirm(`Are you sure you want to delete user "${username}"?`)) {
+           return;
+       }
+
+       try {
+           const response = await fetch(`/api/v1/users/${username}`, {
+               method: 'DELETE',
+               headers: getAuthHeaders()
+           });
+
+           if (!response.ok) {
+               const error = await response.json();
+               throw new Error(error.detail || 'Failed to delete user');
+           }
+
+           alert(`User "${username}" deleted successfully!`);
+           loadUsers();
+       } catch (e) {
+           alert('Error deleting user: ' + e.message);
+       }
+   }
+
+   function showEditUserModal(username, currentRole) {
+       let updateChoice = prompt(
+           `Edit user: ${username}\n\nWhat would you like to update?\n1. Change Role\n2. Reset Password\n3. Change Role and Reset Password\n\nEnter 1, 2, or 3:`,
+           '1'
+       );
+
+       if (!updateChoice || !['1', '2', '3'].includes(updateChoice)) {
+           return;
+       }
+
+       let newRole = null;
+       let newPassword = null;
+
+       // Change role
+       if (updateChoice === '1' || updateChoice === '3') {
+           if (username === 'admin') {
+               alert('Cannot change admin user role');
+               return;
+           }
+
+           newRole = prompt(`Enter new role for ${username} (admin/developer):`, currentRole);
+           if (!newRole || !['admin', 'developer'].includes(newRole)) {
+               alert('Invalid role. Must be "admin" or "developer"');
+               return;
+           }
+       }
+
+       // Reset password
+       if (updateChoice === '2' || updateChoice === '3') {
+           newPassword = prompt(`Enter new password for ${username}:`);
+           if (!newPassword) {
+               alert('Password cannot be empty');
+               return;
+           }
+       }
+
+       updateUser(username, newRole, newPassword);
+   }
+
+   async function updateUser(username, newRole, newPassword) {
+       try {
+           const updates = {};
+           if (newRole) updates.role = newRole;
+           if (newPassword) updates.password = newPassword;
+
+           const response = await fetch(`/api/v1/users/${username}`, {
+               method: 'PUT',
+               headers: getAuthHeaders(),
+               body: JSON.stringify(updates)
+           });
+
+           if (!response.ok) {
+               const error = await response.json();
+               throw new Error(error.detail || 'Failed to update user');
+           }
+
+           let message = `User "${username}" updated successfully!`;
+           if (newPassword) {
+               message += '\nUser will be prompted to change password on next login.';
+           }
+
+           alert(message);
+           loadUsers();
+       } catch (e) {
+           alert('Error updating user: ' + e.message);
+       }
+   }
+
+   // Make functions globally available
+   window.showEditUserModal = showEditUserModal;
+   window.updateUser = updateUser;
+
+   // Make functions globally available
+   window.loadUsers = loadUsers;
+   window.filterUsers = filterUsers;
+   window.showAddUserModal = showAddUserModal;
+   window.deleteUser = deleteUser;
+
+   /* ========================================
+      SUBSCRIPTION VALIDATION
+      ======================================== */
+
+   async function validateSubscription() {
+       try {
+           const data = await apiFetch(`/api/v1/sys/subscription`);
+
+           if (!data ||
+               typeof data !== 'object' ||
+               Object.keys(data).length === 0 ||
+               !data.subscription_id ||
+               data.subscription_id === '' ||
+               data.subscription_id === 'none') {
+
+               throw new Error('Invalid or missing subscription');
+           }
+
+           console.log('✅ Subscription validated:', data.subscription_id);
+           return true;
+
+       } catch (e) {
+           console.error('❌ Subscription validation failed:', e);
+
+           document.body.innerHTML = `
+               <div style="
+                   display: flex;
+                   align-items: center;
+                   justify-content: center;
+                   min-height: 100vh;
+                   background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+                   color: #e2e8f0;
+                   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                   padding: 20px;
+               ">
+                   <div style="
+                       max-width: 500px;
+                       text-align: center;
+                       background: rgba(239, 68, 68, 0.1);
+                       border: 2px solid #ef4444;
+                       border-radius: 16px;
+                       padding: 40px;
+                       box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+                   ">
+                       <div style="font-size: 64px; margin-bottom: 20px;">🚫</div>
+                       <h1 style="
+                           font-size: 28px;
+                           font-weight: 600;
+                           color: #ef4444;
+                           margin-bottom: 20px;
+                       ">Subscription Required</h1>
+                       <p style="
+                           font-size: 16px;
+                           line-height: 1.6;
+                           color: #cbd5e1;
+                           margin-bottom: 30px;
+                       ">
+                           You need a valid TreehopperAI subscription to access this dashboard.
+                       </p>
+                       <div style="
+                           background: rgba(15, 23, 42, 0.6);
+                           border-radius: 8px;
+                           padding: 20px;
+                           margin-bottom: 30px;
+                           text-align: left;
+                           font-family: 'Courier New', monospace;
+                           font-size: 14px;
+                           color: #94a3b8;
+                       ">
+                           <strong style="color: #ef4444;">Error:</strong> ${e.message}<br><br>
+                           Please contact your administrator or<br>
+                           If you have run the CLI you must be having a subscription_id.txt in .treehopper directory.
+                       </div>
+                       <button onclick="location.reload()" style="
+                           background: linear-gradient(135deg, #10b981, #059669);
+                           color: white;
+                           border: none;
+                           padding: 12px 32px;
+                           border-radius: 8px;
+                           font-size: 16px;
+                           font-weight: 600;
+                           cursor: pointer;
+                           transition: all 0.2s;
+                       " onmouseover="this.style.transform='translateY(-2px)'"
+                          onmouseout="this.style.transform='translateY(0)'">
+                           Retry
+                       </button>
+                   </div>
+               </div>
+           `;
+
+           return false;
+       }
+   }
+
+   /* ========================================
+      INITIALIZATION
+      ======================================== */
+
+   async function init() {
+       // First, check authentication
+       if (!checkAuth()) {
+           return; // Will redirect to login
+       }
+
+       // Then validate subscription
+       const isValid = await validateSubscription();
+
+       if (!isValid) {
+           return;
+       }
+
+       // Load core features
+       loadTheme();
+       loadSavedTab();
+       loadState();
+       loadLogs();
+       loadInputFiles();
+       initLiveEvents();
+
+       // Load analytics dashboard
+       loadAnalytics();
+
+       // Load users if admin
+       const role = localStorage.getItem('user_role');
+       if (role === 'admin') {
+           loadUsers();
+       }
+
+       // Set up auto-refresh
+       updateInterval = setInterval(() => {
+           loadState();
+           loadInputFiles();
+           loadAnalytics();
+       }, 30000);
+   }
+
+   init();

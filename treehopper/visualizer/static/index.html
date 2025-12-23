@@ -3,12 +3,25 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="icon" type="image/png" href="/static/favicon.ico">
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="shortcut icon" type="image/x-icon" href="/static/favicon.ico">
   <title>TreehopperAI Dashboard</title>
   <link rel="stylesheet" href="style.css">
+
+  <!-- D3.js and Graphviz libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@hpcc-js/wasm@2.20.0/dist/graphviz.umd.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3-graphviz@5.6.0/build/d3-graphviz.min.js"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <!-- Our script - loaded in head with defer so functions are available for onclick -->
+  <script defer src="script.js"></script>
 </head>
 <body>
   <div class="container">
+    <!-- Header -->
     <div class="header">
         <img src="treehopper_logo.png" alt="TreehopperAI Logo" class="logo">
         <h1>TreehopperAI</h1>
@@ -19,7 +32,7 @@
                   <path d="M5 25 L15 25 L20 10 L30 40 L35 25 L45 25" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
                 <span id="statusText">Connecting...</span>
-              </div>
+            </div>
 
           <div class="menu-container">
             <button class="hamburger-btn" onclick="toggleMenu()" title="Menu">
@@ -37,130 +50,305 @@
                 <span class="dropdown-item-icon">🧾</span>
                 <span class="dropdown-item-text">Subscription ID</span>
               </div>
+              <div class="dropdown-item" onclick="logout()">
+                <span class="dropdown-item-icon">🚪</span>
+                <span class="dropdown-item-text">Logout</span>
+              </div>
             </div>
           </div>
-        </div> </div>
-
-    <div class="grid">
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">
-            <span class="card-icon">🤖</span>
-            Agents
-          </div>
-          <span class="card-count" id="agentCount">0</span>
         </div>
-        <div class="search-container" style="padding: 0 10px 10px 10px;">
-            <input type="text" class="search-input" placeholder="Search agents..." oninput="filterCardList('agentsList', this.value)">
-          </div>
-        <div class="list-container" id="agentsList">
-          <div class="loading">Loading agents...</div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">
-            <span class="card-icon">⛓️</span>
-            Chains
-          </div>
-          <span class="card-count" id="chainCount">0</span>
-        </div>
-        <div class="search-container" style="padding: 0 10px 10px 10px;">
-            <input type="text" class="search-input" placeholder="Search chains..." oninput="filterCardList('chainsList', this.value)">
-          </div>
-        <div class="list-container" id="chainsList">
-          <div class="loading">Loading chains...</div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">
-            <span class="card-icon">⚙️</span>
-            Processes
-          </div>
-          <span class="card-count" id="pidCount">0</span>
-        </div>
-        <div class="search-container" style="padding: 0 10px 10px 10px;">
-            <input type="text" class="search-input" placeholder="Search processes..." oninput="filterCardList('pidsList', this.value)">
-          </div>
-        <div class="list-container" id="pidsList">
-          <div class="loading">Loading processes...</div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title"><span class="card-icon">📡</span>Live Events</div>
-          <div class="header-actions">
-            <button class="action-btn" onclick="initLiveEvents()">🔄 Refresh</button>
-            <button class="action-btn" onclick="downloadContent('liveEvents', 'live_events.txt')">📥 Download</button>
-          </div>
-        </div>
-        <div class="list-container">
-          <pre id="liveEvents" class="json-display"></pre>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title"><span class="card-icon">📂</span>Input Files</div>
-          <button class="action-btn" onclick="loadInputFiles()">🔄 Refresh</button>
-        </div>
-        <div class="search-container" style="padding: 0 10px 10px 10px;">
-            <input type="text" class="search-input" placeholder="Search files..." oninput="filterCardList('inputFilesList', this.value)">
-          </div>
-        <div class="list-container" id="inputFilesList">
-          </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">
-            <span class="card-icon">⏱️</span>
-            Run Timeline
-          </div>
-          <div class="header-actions">
-            <button class="action-btn" onclick="clearBox('runEvents')">🧹 Clear</button>
-            <button class="action-btn" onclick="downloadContent('runEvents', 'timeline.txt')">📥 Download</button>
-         </div>
-        </div>
-        <div style="margin-bottom: 15px;">
-          <input id="runIdInput" placeholder="run_id" class="search-input" style="margin-bottom: 8px;">
-          <input id="portInput" placeholder="chain port" class="search-input" style="margin-bottom: 8px;">
-          <button onclick="connectRunWs()" class="refresh-button" style="width: 100%;">Connect</button>
-        </div>
-        <div class="list-container">
-          <pre id="runEvents" class="json-display"></pre>
-        </div>
-      </div>
     </div>
 
-    <div class="card logs-card">
-      <div class="card-header">
-        <div class="card-title">
-          <span class="card-icon">📋</span>
-          System Logs
-        </div>
-        <div class="header-actions">
-            <button class="refresh-button" onclick="loadLogs()">🔄 Refresh</button>
-            <button class="refresh-button" onclick="downloadLogsCSV()">📊 CSV</button>
+    <!-- Tab Navigation -->
+    <div class="tab-navigation">
+      <button class="tab-btn active" onclick="switchTab('overview')" data-tab="overview">
+        <span class="tab-icon">🏠</span>
+        <span class="tab-label">Overview</span>
+      </button>
+      <button class="tab-btn" onclick="switchTab('analytics')" data-tab="analytics">
+        <span class="tab-icon">📊</span>
+        <span class="tab-label">Analytics</span>
+      </button>
+      <button class="tab-btn" onclick="switchTab('logs')" data-tab="logs">
+        <span class="tab-icon">📋</span>
+        <span class="tab-label">System Logs</span>
+      </button>
+      <button class="tab-btn" id="usersTab" onclick="switchTab('users')" data-tab="users" style="display: none;">
+        <span class="tab-icon">👥</span>
+        <span class="tab-label">Users</span>
+      </button>
+    </div>
+
+    <!-- Tab Content Container -->
+    <div class="tab-content-wrapper">
+
+      <!-- TAB 1: Overview -->
+      <div id="tab-overview" class="tab-content active">
+        <div class="grid">
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">
+                <span class="card-icon">🤖</span>
+                Agents
+              </div>
+              <span class="card-count" id="agentCount">0</span>
+            </div>
+            <div class="search-container" style="padding: 0 10px 10px 10px;">
+                <input type="text" class="search-input" placeholder="Search agents..." oninput="filterCardList('agentsList', this.value)">
+            </div>
+            <div class="list-container" id="agentsList">
+              <div class="loading">Loading agents...</div>
+            </div>
           </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">
+                <span class="card-icon">⛓️</span>
+                Chains
+              </div>
+              <span class="card-count" id="chainCount">0</span>
+            </div>
+            <div class="search-container" style="padding: 0 10px 10px 10px;">
+                <input type="text" class="search-input" placeholder="Search chains..." oninput="filterCardList('chainsList', this.value)">
+            </div>
+            <div class="list-container" id="chainsList">
+              <div class="loading">Loading chains...</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">
+                <span class="card-icon">⚙️</span>
+                Processes
+              </div>
+              <span class="card-count" id="pidCount">0</span>
+            </div>
+            <div class="search-container" style="padding: 0 10px 10px 10px;">
+                <input type="text" class="search-input" placeholder="Search processes..." oninput="filterCardList('pidsList', this.value)">
+            </div>
+            <div class="list-container" id="pidsList">
+              <div class="loading">Loading processes...</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title"><span class="card-icon">📡</span>Live Events</div>
+              <div class="header-actions">
+                <button class="action-btn" onclick="initLiveEvents()">🔄 Refresh</button>
+                <button class="action-btn" onclick="downloadContent('liveEvents', 'live_events.txt')">📥 Download</button>
+              </div>
+            </div>
+            <div class="list-container">
+              <pre id="liveEvents" class="json-display"></pre>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title"><span class="card-icon">📂</span>Input Files</div>
+              <button class="action-btn" onclick="loadInputFiles()">🔄 Refresh</button>
+            </div>
+            <div class="search-container" style="padding: 0 10px 10px 10px;">
+                <input type="text" class="search-input" placeholder="Search files..." oninput="filterCardList('inputFilesList', this.value)">
+            </div>
+            <div class="list-container" id="inputFilesList">
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">
+                <span class="card-icon">⏱️</span>
+                Run Timeline
+              </div>
+              <div class="header-actions">
+                <button class="action-btn" onclick="clearBox('runEvents')">🧹 Clear</button>
+                <button class="action-btn" onclick="downloadContent('runEvents', 'timeline.txt')">📥 Download</button>
+            </div>
+            </div>
+            <div style="margin-bottom: 15px;">
+              <input id="runIdInput" placeholder="run_id" class="search-input" style="margin-bottom: 8px;">
+              <input id="portInput" placeholder="chain port" class="search-input" style="margin-bottom: 8px;">
+              <button onclick="connectRunWs()" class="refresh-button" style="width: 100%;">Connect</button>
+            </div>
+            <div class="list-container">
+              <pre id="runEvents" class="json-display"></pre>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="search-container">
-        <input
-          type="text"
-          class="search-input"
-          id="logSearch"
-          placeholder="Search logs by timestamp, level, logger, or message..."
-          oninput="filterLogs()"
-        >
+
+      <!-- TAB 2: Analytics Dashboard -->
+      <div id="tab-analytics" class="tab-content">
+        <div class="analytics-section">
+          <div class="analytics-header">
+              <h2 class="analytics-title">📊 Analytics Dashboard</h2>
+              <div class="time-window-selector">
+                  <button class="window-btn active" data-window="1h" onclick="changeTimeWindow('1h')">1 Hour</button>
+                  <button class="window-btn" data-window="24h" onclick="changeTimeWindow('24h')">24 Hours</button>
+                  <button class="window-btn" data-window="7d" onclick="changeTimeWindow('7d')">7 Days</button>
+              </div>
+          </div>
+
+          <!-- KPI Cards -->
+          <div class="kpi-grid">
+              <div class="kpi-card">
+                  <div class="kpi-icon">🎯</div>
+                  <div class="kpi-content">
+                      <div class="kpi-label">Total Runs</div>
+                      <div class="kpi-value" id="kpi-total-runs">-</div>
+                      <div class="kpi-trend" id="kpi-runs-trend"></div>
+                  </div>
+              </div>
+
+              <div class="kpi-card success">
+                  <div class="kpi-icon">✅</div>
+                  <div class="kpi-content">
+                      <div class="kpi-label">Successful</div>
+                      <div class="kpi-value" id="kpi-success-runs">-</div>
+                      <div class="kpi-subtext" id="kpi-success-rate"></div>
+                  </div>
+              </div>
+
+              <div class="kpi-card error">
+                  <div class="kpi-icon">❌</div>
+                  <div class="kpi-content">
+                      <div class="kpi-label">Failed</div>
+                      <div class="kpi-value" id="kpi-failed-runs">-</div>
+                      <div class="kpi-subtext" id="kpi-error-count"></div>
+                  </div>
+              </div>
+
+              <div class="kpi-card">
+                  <div class="kpi-icon">📁</div>
+                  <div class="kpi-content">
+                      <div class="kpi-label">Files Processed</div>
+                      <div class="kpi-value" id="kpi-file-count">-</div>
+                      <div class="kpi-subtext" id="kpi-file-size"></div>
+                  </div>
+              </div>
+          </div>
+
+          <!-- Charts Grid -->
+          <div class="charts-grid">
+              <div class="chart-card">
+                  <div class="chart-header">
+                      <h3 class="chart-title">🥧 Events by Type</h3>
+                  </div>
+                  <div class="chart-body">
+                      <canvas id="eventsPieChart"></canvas>
+                  </div>
+              </div>
+
+              <div class="chart-card">
+                  <div class="chart-header">
+                      <h3 class="chart-title">🥧 Files by Extension</h3>
+                  </div>
+                  <div class="chart-body">
+                      <canvas id="filesPieChart"></canvas>
+                  </div>
+              </div>
+
+              <div class="chart-card">
+                  <div class="chart-header">
+                      <h3 class="chart-title">🥧 Run Status</h3>
+                  </div>
+                  <div class="chart-body">
+                      <canvas id="runsDonutChart"></canvas>
+                  </div>
+              </div>
+
+              <div class="chart-card wide">
+                  <div class="chart-header">
+                      <h3 class="chart-title">🔥 Chain Activity</h3>
+                  </div>
+                  <div class="chart-body">
+                      <canvas id="chainsBarChart"></canvas>
+                  </div>
+              </div>
+
+              <div class="chart-card wide">
+                  <div class="chart-header">
+                      <h3 class="chart-title">🔥 Agent Invocations</h3>
+                  </div>
+                  <div class="chart-body">
+                      <canvas id="agentsBarChart"></canvas>
+                  </div>
+              </div>
+
+              <div class="chart-card full-width">
+                  <div class="chart-header">
+                      <h3 class="chart-title">📈 Runs Over Time</h3>
+                  </div>
+                  <div class="chart-body">
+                      <canvas id="timelineChart"></canvas>
+                  </div>
+              </div>
+          </div>
+        </div>
       </div>
-      <div class="log-table-container" id="logsContainer">
-        <div class="loading">Loading logs...</div>
+
+      <!-- TAB 3: System Logs -->
+      <!-- TAB 3: System Logs -->
+      <div id="tab-logs" class="tab-content">
+        <div class="card logs-card">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="card-icon">📋</span>
+              System Logs
+            </div>
+            <div class="header-actions">
+                <button class="refresh-button" onclick="loadLogs()">🔄 Refresh</button>
+                <button class="refresh-button" onclick="downloadLogsCSV()">📊 CSV</button>
+            </div>
+          </div>
+          <div class="search-container">
+            <input
+              type="text"
+              class="search-input"
+              id="logSearch"
+              placeholder="Search logs by timestamp, level, logger, or message..."
+              oninput="filterLogs()"
+            >
+          </div>
+          <div class="log-table-container" id="logsContainer">
+            <div class="loading">Loading logs...</div>
+          </div>
+          <div id="logPagination" class="pagination-container"></div>
+        </div>
       </div>
-      <div id="logPagination" class="pagination-container"></div>
+
+      <!-- TAB 4: Users (Admin Only) -->
+      <div id="tab-users" class="tab-content">
+        <div class="card logs-card">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="card-icon">👥</span>
+              User Management
+            </div>
+            <div class="header-actions">
+                <button class="refresh-button" onclick="loadUsers()">🔄 Refresh</button>
+                <button class="refresh-button" onclick="showAddUserModal()">➕ Add User</button>
+            </div>
+          </div>
+          <div class="search-container">
+            <input
+              type="text"
+              class="search-input"
+              id="userSearch"
+              placeholder="Search users by username or role..."
+              oninput="filterUsers()"
+            >
+          </div>
+          <div class="log-table-container" id="usersContainer">
+            <div class="loading">Loading users...</div>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -198,18 +386,29 @@
   </div>
 
   <div id="chainFlowModal" class="modal">
-    <div class="modal-content">
-      <h3 id="chainFlowTitle"></h3>
-      <pre id="chainFlowBody"></pre>
-      <button onclick="closeModal('chainFlowModal')" class="refresh-button" style="margin-top: 15px; width: 100%;">Close</button>
+    <div class="modal-content chain-flow-modal">
+      <div class="chain-flow-header">
+        <h3 id="chainFlowTitle"></h3>
+        <div class="chain-flow-controls">
+          <button onclick="resetZoom()" class="zoom-btn" title="Reset Zoom (0)">🔍 Reset</button>
+          <button onclick="zoomIn()" class="zoom-btn" title="Zoom In (+)">➕</button>
+          <button onclick="zoomOut()" class="zoom-btn" title="Zoom Out (-)">➖</button>
+        </div>
+      </div>
+
+      <div id="chainFlowBody" class="chain-flow-container"></div>
+
+      <button onclick="closeModal('chainFlowModal')" class="refresh-button close-flow-btn">
+        Close
+      </button>
     </div>
   </div>
+
   <footer class="dashboard-footer">
     <span>&copy; 2025-2026</span>
     <img src="treehopper_logo.png" alt="TreehopperAI Logo" class="footer-logo">
     <span>TreehopperAI</span>
-</footer>
+  </footer>
 
-  <script src="script.js"></script>
 </body>
 </html>
