@@ -25,6 +25,7 @@ from treehopper.chains_agents_refresh_status import (
 )
 from treehopper.whatis import print_whatis
 from treehopper.th_ui_cli import launch_ui, stop_ui
+from treehopper.visualizer.db_util import db
 
 # ==============================================================================
 # GLOBAL OVERRIDE FOR DEVELOPMENT
@@ -1215,6 +1216,9 @@ Treehopper CLI Commands
 # MAIN
 # ---------------------------------------------------------------------
 def main() -> None:
+    logger.info("[treehopper_cli] Initialising the DB if not exists")
+    db.init_db()
+    logger.info("[treehopper_cli] Ensuring all directories exists")
     ensure_dirs()
     if len(sys.argv) == 1:
         print_whatis()

@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="icon" type="image/x-icon" href="/favicon.ico">
-  <link rel="shortcut icon" type="image/x-icon" href="/static/favicon.ico">
+  <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+  <!--<link rel="shortcut icon" type="image/x-icon" href="/static/favicon.ico">-->
   <title>TreehopperAI Dashboard</title>
   <link rel="stylesheet" href="style.css">
 
@@ -16,6 +16,9 @@
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
+  <!-- ADD THESE 2 LINES BEFORE script.js -->
+  <link rel="stylesheet" href="modal-system.css">
+  <script src="modal-system.js"></script>
   <!-- Our script - loaded in head with defer so functions are available for onclick -->
   <script defer src="script.js"></script>
 </head>

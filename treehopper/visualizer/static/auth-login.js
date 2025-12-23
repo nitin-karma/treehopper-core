@@ -159,7 +159,7 @@ function closePasswordModal() {
     if (!userNeedsPasswordChange) {
         document.getElementById('changePasswordModal').style.display = 'none';
     } else {
-        alert('You must change your password before continuing.');
+        showError('You must change your password before continuing.', 'Password Change Required');
     }
 }
 

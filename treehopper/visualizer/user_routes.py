@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from treehopper.visualizer.db_util import db
 from treehopper.th_config import DEFAULT_API_KEY, ACCESS_TOKEN_EXPIRE_MINUTES
+from typing import Optional
 
 # Configuration
 SECRET_KEY = DEFAULT_API_KEY
@@ -29,8 +30,8 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    role: str
-    password: str
+    role: Optional[str] = None
+    password: Optional[str] = None
 
 
 class PasswordChange(BaseModel):
@@ -321,6 +322,7 @@ async def add_user(user: UserCreate, _=Depends(check_permission("manage_users"))
 async def update_user(
     username: str, updates: UserUpdate, _=Depends(check_permission("manage_users"))
 ):
+    print(username, updates)
     """
     Update user (admin only).
     Can update role and/or password.

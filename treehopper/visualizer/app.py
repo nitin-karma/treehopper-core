@@ -19,7 +19,7 @@ import asyncio
 import yaml
 from datetime import datetime
 from collections import Counter, defaultdict
-from typing import Counter as CounterType, Dict
+from typing import Counter as CounterType, Dict, Any
 import time
 from treehopper.visualizer.state import snapshot
 from treehopper.visualizer.log_tail import read_logs
@@ -101,6 +101,11 @@ async def restrict_to_ui(request: Request, call_next):
 @app.get("/")
 async def serve_login():
     return FileResponse(Path(__file__).parent / "static" / "login.html")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return FileResponse(Path(__file__).parent / "static" / "favicon.ico")
 
 
 # 2. Main Dashboard Page
@@ -678,91 +683,309 @@ def normalize_ts(ts):
     return None
 
 
+def format_value(v: Any) -> Any:
+    """Helper to convert numbers >= 1,000,000 to '1MN' string format."""
+    if isinstance(v, (int, float)) and v >= 1000000:
+        return f"{v / 1000000:.1f}MN".replace(".0MN", "MN")
+    return v
+
+
+def recursive_format(data: Any) -> Any:
+    """Recursively walks through dicts and lists to format numbers."""
+    if isinstance(data, dict):
+        return {k: recursive_format(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [recursive_format(i) for i in data]
+    else:
+        return format_value(data)
+
+
+# Mock summary implementation
+# @app.get("/api/v1/summary")
+# def get_summary(window: str = Query("24h", enum=["1h", "24h", "7d"])):
+#     now = int(time.time())
+#     logger.info(now)
+
+#     MOCK = {
+#         "1h": {
+#             "time_window": "1h",
+#             "runs": {"total": 4, "success": 3, "failed": 1},
+#             "chains": {
+#                 "by_chain": {
+#                     "simple_doc_flow": 2,
+#                     "doc_intel": 2,
+#                 }
+#             },
+#             "agents": {
+#                 "invocations": {
+#                     "pdf_extractor": 4,
+#                     "content_analyzer": 3,
+#                     "report_generator": 2,
+#                     "keyword_extractor": 1,
+#                 }
+#             },
+#             "files": {
+#                 "count": 2,
+#                 "total_size_mb": 0.01,
+#                 "by_extension": {"pdf": 1, "txt": 1},
+#             },
+#             "events": {
+#                 "by_type": {
+#                     "run_started": 4,
+#                     "agent_start": 10,
+#                     "agent_complete": 9,
+#                     "run_completed": 4,
+#                 }
+#             },
+#             "timeline": {
+#                 "runs_per_minute": [
+#                     {"minute": "10:05", "count": 1},
+#                     {"minute": "10:12", "count": 2},
+#                     {"minute": "10:40", "count": 1},
+#                 ]
+#             },
+#         },
+#         "24h": {
+#             "time_window": "24h",
+#             "runs": {"total": 1000000, "success": 1500000000, "failed": 300000000},
+#             "chains": {
+#                 "by_chain": {
+#                     "simple_doc_flow": 6,
+#                     "doc_intel": 8,
+#                     "dynamic_doc_intel": 4,
+#                 }
+#             },
+#             "agents": {
+#                 "invocations": {
+#                     "pdf_extractor": 32,
+#                     "content_analyzer": 28,
+#                     "report_generator": 20,
+#                     "keyword_extractor": 14,
+#                     "teams_notifier": 4,
+#                 }
+#             },
+#             "files": {
+#                 "count": 9,
+#                 "total_size_mb": 0.12,
+#                 "by_extension": {"pdf": 6, "txt": 3},
+#             },
+#             "events": {
+#                 "by_type": {
+#                     "run_started": 18,
+#                     "agent_start": 98,
+#                     "agent_complete": 95,
+#                     "step_complete": 40,
+#                     "run_completed": 18,
+#                 }
+#             },
+#             "timeline": {
+#                 "runs_per_hour": [
+#                     {"hour": "02:00", "count": 2},
+#                     {"hour": "06:00", "count": 3},
+#                     {"hour": "10:00", "count": 7},
+#                     {"hour": "14:00", "count": 4},
+#                     {"hour": "18:00", "count": 2},
+#                 ]
+#             },
+#         },
+#         "7d": {
+#             "time_window": "7d",
+#             "runs": {"total": 76, "success": 68, "failed": 8},
+#             "chains": {
+#                 "by_chain": {
+#                     "simple_doc_flow": 20,
+#                     "doc_intel": 32,
+#                     "dynamic_doc_intel": 24,
+#                 }
+#             },
+#             "agents": {
+#                 "invocations": {
+#                     "pdf_extractor": 180,
+#                     "content_analyzer": 150,
+#                     "report_generator": 96,
+#                     "keyword_extractor": 70,
+#                     "teams_notifier": 18,
+#                 }
+#             },
+#             "files": {
+#                 "count": 34,
+#                 "total_size_mb": 0.84,
+#                 "by_extension": {"pdf": 21, "txt": 9, "csv": 4},
+#             },
+#             "events": {
+#                 "by_type": {
+#                     "run_started": 76,
+#                     "agent_start": 514,
+#                     "agent_complete": 501,
+#                     "step_complete": 230,
+#                     "run_completed": 76,
+#                 }
+#             },
+#             "timeline": {
+#                 "runs_per_day": [
+#                     {"day": "Mon", "count": 10},
+#                     {"day": "Tue", "count": 14},
+#                     {"day": "Wed", "count": 9},
+#                     {"day": "Thu", "count": 13},
+#                     {"day": "Fri", "count": 16},
+#                     {"day": "Sat", "count": 8},
+#                     {"day": "Sun", "count": 6},
+#                 ]
+#             },
+#         },
+#     }
+
+#     return recursive_format(MOCK[window])
+
+
+# 1 Original implementation
+# @app.get("/api/v1/summary")
+# def get_summary(window: str = Query("24h", enum=LOG_SCHEDULE)):
+
+#     now = time.time()
+#     window_sec = {"1h": 3600, "24h": 86400, "7d": 604800}[window]
+#     cutoff = now - window_sec
+
+#     # -------------------------------------------------
+#     # 1. Parse runtime events
+#     # -------------------------------------------------
+#     event_counts: CounterType[str] = Counter()
+#     chain_counts: CounterType[str] = Counter()
+#     agent_counts: CounterType[str] = Counter()
+#     runs_success: int = 0
+#     runs_failed: int = 0
+#     timeline: Dict[str, int] = defaultdict(int)
+
+#     if WS_EVENTS_DIR.exists():
+#         for f in WS_EVENTS_DIR.glob("*.jsonl"):
+#             with open(f, "r") as fh:
+#                 for line in fh:
+#                     try:
+#                         ev = json.loads(line)
+#                     except Exception:
+#                         continue
+
+#                     raw_ts = ev.get("ts") or ev.get("timestamp")
+#                     ts = normalize_ts(raw_ts)
+#                     if ts is None:
+#                         print("[summary] Skipping event with invalid ts:", raw_ts)
+
+#                     if ts is None or ts < cutoff:
+#                         continue
+
+#                     etype = ev.get("type")
+#                     event_counts[etype] += 1
+
+#                     if "chain" in ev:
+#                         chain_counts[ev["chain"]] += 1
+
+#                     if "agent" in ev:
+#                         agent_counts[ev["agent"]] += 1
+
+#                     if etype == "run_completed":
+#                         runs_success += 1
+#                     if etype == "error":
+#                         runs_failed += 1
+
+#                     if ts:
+#                         hour = time.strftime("%H:00", time.localtime(ts))
+#                         timeline[hour] += 1
+
+#     # -------------------------------------------------
+#     # 2. Shared files stats (reuse existing endpoint logic)
+#     # -------------------------------------------------
+#     shared_dir = REGISTRY_DIR / "shared"
+#     file_ext: CounterType[str] = Counter()
+#     total_size = 0
+#     file_count = 0
+
+#     if shared_dir.exists():
+#         for p in shared_dir.rglob("*"):
+#             if p.is_file():
+#                 file_count += 1
+#                 total_size += p.stat().st_size
+#                 ext = p.suffix.lstrip(".") or "unknown"
+#                 file_ext[ext] += 1
+
+#     # -------------------------------------------------
+#     # 3. Response
+#     # -------------------------------------------------
+#     res = {
+#         "time_window": window,
+#         "runs": {
+#             "total": runs_success + runs_failed,
+#             "success": runs_success,
+#             "failed": runs_failed,
+#         },
+#         "chains": {"by_chain": dict(chain_counts)},
+#         "agents": {"invocations": dict(agent_counts)},
+#         "files": {
+#             "count": file_count,
+#             "total_size_mb": round(total_size / (1024 * 1024), 2),
+#             "by_extension": dict(file_ext),
+#         },
+#         "events": {"by_type": dict(event_counts)},
+#         "timeline": {
+#             "runs_per_hour": [
+#                 {"hour": h, "count": c} for h, c in sorted(timeline.items())
+#             ]
+#         },
+#     }
+#     logger.info(res)
+#     return res
+
+
 @app.get("/api/v1/summary")
 def get_summary(window: str = Query("24h", enum=LOG_SCHEDULE)):
-
     now = time.time()
     window_sec = {"1h": 3600, "24h": 86400, "7d": 604800}[window]
     cutoff = now - window_sec
 
-    # -------------------------------------------------
-    # 1. Parse runtime events
-    # -------------------------------------------------
-    event_counts: CounterType[str] = Counter()
+    rows = db.fetch_all(
+        """
+        SELECT *
+        FROM analytics_events
+        WHERE ts >= ?
+        """,
+        (cutoff,),
+    )
+
+    runs = set()
+    runs_success = 0
+    runs_failed = 0
+
     chain_counts: CounterType[str] = Counter()
     agent_counts: CounterType[str] = Counter()
-    runs_success: int = 0
-    runs_failed: int = 0
+    event_counts: CounterType[str] = Counter()
     timeline: Dict[str, int] = defaultdict(int)
 
-    if WS_EVENTS_DIR.exists():
-        for f in WS_EVENTS_DIR.glob("*.jsonl"):
-            with open(f, "r") as fh:
-                for line in fh:
-                    try:
-                        ev = json.loads(line)
-                    except Exception:
-                        continue
+    for r in rows:
+        event_counts[r["event_type"]] += 1
 
-                    raw_ts = ev.get("ts") or ev.get("timestamp")
-                    ts = normalize_ts(raw_ts)
-                    if ts is None:
-                        print("[summary] Skipping event with invalid ts:", raw_ts)
+        if r["chain_name"]:
+            chain_counts[r["chain_name"]] += 1
 
-                    if ts is None or ts < cutoff:
-                        continue
+        if r["agent_name"]:
+            agent_counts[r["agent_name"]] += 1
 
-                    etype = ev.get("type")
-                    event_counts[etype] += 1
+        if r["run_id"]:
+            runs.add(r["run_id"])
 
-                    if "chain" in ev:
-                        chain_counts[ev["chain"]] += 1
+        if r["event_type"] == "run_completed":
+            runs_success += 1
 
-                    if "agent" in ev:
-                        agent_counts[ev["agent"]] += 1
+        hour = time.strftime("%H:00", time.localtime(r["ts"]))
+        timeline[hour] += 1
 
-                    if etype == "run_completed":
-                        runs_success += 1
-                    if etype == "error":
-                        runs_failed += 1
-
-                    if ts:
-                        hour = time.strftime("%H:00", time.localtime(ts))
-                        timeline[hour] += 1
-
-    # -------------------------------------------------
-    # 2. Shared files stats (reuse existing endpoint logic)
-    # -------------------------------------------------
-    shared_dir = REGISTRY_DIR / "shared"
-    file_ext: CounterType[str] = Counter()
-    total_size = 0
-    file_count = 0
-
-    if shared_dir.exists():
-        for p in shared_dir.rglob("*"):
-            if p.is_file():
-                file_count += 1
-                total_size += p.stat().st_size
-                ext = p.suffix.lstrip(".") or "unknown"
-                file_ext[ext] += 1
-
-    # -------------------------------------------------
-    # 3. Response
-    # -------------------------------------------------
-    res = {
+    return {
         "time_window": window,
         "runs": {
-            "total": runs_success + runs_failed,
+            "total": len(runs),
             "success": runs_success,
             "failed": runs_failed,
         },
         "chains": {"by_chain": dict(chain_counts)},
         "agents": {"invocations": dict(agent_counts)},
-        "files": {
-            "count": file_count,
-            "total_size_mb": round(total_size / (1024 * 1024), 2),
-            "by_extension": dict(file_ext),
-        },
         "events": {"by_type": dict(event_counts)},
         "timeline": {
             "runs_per_hour": [
@@ -770,8 +993,6 @@ def get_summary(window: str = Query("24h", enum=LOG_SCHEDULE)):
             ]
         },
     }
-    logger.info(res)
-    return res
 
 
 # -------------------------------------------------------------------

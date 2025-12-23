@@ -7,6 +7,10 @@ import json
 from fastapi import WebSocket
 from treehopper.websockets.schema_guard import validate_event
 from treehopper.th_config import TH_ROOT
+from treehopper.visualizer.analytics_recorder import record_analytics_event
+from treehopper.logging import get_logger
+
+logger = get_logger()
 
 
 class WSManager:
@@ -24,6 +28,7 @@ class WSManager:
     # ------------------------------------------------------------------
 
     def _run_event_file(self, run_id: str) -> Path:
+        logger.info(f"Running event file for {run_id}")
         return TH_ROOT / "registry" / "chains" / "events" / f"{run_id}.events.jsonl"
 
     def _record_event(self, run_id: str, event: dict):
@@ -37,6 +42,7 @@ class WSManager:
         enriched["ts"] = datetime.utcnow().isoformat()
 
         with p.open("a") as f:
+            logger.info(f"_record_event at {p} for {run_id}")
             f.write(json.dumps(enriched) + "\n")
 
     async def _replay_from_file(
@@ -53,7 +59,8 @@ class WSManager:
         for line in lines:
             try:
                 await websocket.send_text(line)
-            except Exception:
+            except Exception as e:
+                logger.error(str(e))
                 break
 
     # ------------------------------------------------------------------
@@ -98,6 +105,13 @@ class WSManager:
         # -------------------------------
         self._record_event(run_id, event)
 
+        # B. Analytics sink (NEW)
+        try:
+            record_analytics_event(run_id, chain_name, event)
+        except Exception as e:
+            # Never break runtime because of analytics
+            logger.error("[analytics] failed:", e)
+
         # -------------------------------
         # Run scope
         # -------------------------------
@@ -105,7 +119,8 @@ class WSManager:
         for ws in list(self.run_connections.get(run_id, [])):
             try:
                 await ws.send_json(event)
-            except Exception:
+            except Exception as e:
+                logger.error(str(e))
                 self.run_connections[run_id].discard(ws)
 
         # -------------------------------
@@ -116,7 +131,8 @@ class WSManager:
         for ws in list(self.chain_connections.get(chain_name, [])):
             try:
                 await ws.send_json(chain_event)
-            except Exception:
+            except Exception as e:
+                logger.error(str(e))
                 self.chain_connections[chain_name].discard(ws)
 
 

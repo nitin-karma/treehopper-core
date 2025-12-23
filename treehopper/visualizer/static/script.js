@@ -41,8 +41,9 @@
    }
 
    // Logout function
-   function logout() {
-       if (confirm('Are you sure you want to logout?')) {
+   async function logout() {
+       const confirmed = await showConfirm('Are you sure you want to logout?', 'Logout');
+       if (confirmed) {
            localStorage.removeItem('access_token');
            localStorage.removeItem('user_role');
            localStorage.removeItem('username');
@@ -138,23 +139,57 @@
    // Color schemes for analytics
    const COLORS = {
        dark: {
-           primary: ['#10b981', '#34d399', '#6ee7b7', '#a7f3d0', '#d1fae5'],
+           // Vibrant varied colors for pie charts and bar charts
+           primary: [
+               '#10b981',  // Green
+               '#3b82f6',  // Blue
+               '#f59e0b',  // Orange
+               '#ef4444',  // Red
+               '#a78bfa',  // Purple
+               '#ec4899',  // Pink
+               '#14b8a6',  // Teal
+               '#f97316',  // Orange-Red
+               '#8b5cf6',  // Violet
+               '#06b6d4',  // Cyan
+               '#84cc16',  // Lime
+               '#eab308'   // Yellow
+           ],
            success: '#10b981',
            error: '#ef4444',
            warning: '#f59e0b',
            info: '#3b82f6',
            purple: '#a78bfa',
+           pink: '#ec4899',
+           teal: '#14b8a6',
+           cyan: '#06b6d4',
            gridColor: 'rgba(148, 163, 184, 0.1)',
            textColor: '#e2e8f0',
            subTextColor: '#94a3b8'
        },
        light: {
-           primary: ['#059669', '#10b981', '#34d399', '#6ee7b7', '#a7f3d0'],
+           // Vibrant varied colors for light mode
+           primary: [
+               '#059669',  // Green
+               '#2563eb',  // Blue
+               '#d97706',  // Orange
+               '#dc2626',  // Red
+               '#7c3aed',  // Purple
+               '#db2777',  // Pink
+               '#0d9488',  // Teal
+               '#ea580c',  // Orange-Red
+               '#7c3aed',  // Violet
+               '#0891b2',  // Cyan
+               '#65a30d',  // Lime
+               '#ca8a04'   // Yellow
+           ],
            success: '#059669',
            error: '#dc2626',
            warning: '#d97706',
            info: '#2563eb',
            purple: '#7c3aed',
+           pink: '#db2777',
+           teal: '#0d9488',
+           cyan: '#0891b2',
            gridColor: 'rgba(148, 163, 184, 0.2)',
            textColor: '#1e293b',
            subTextColor: '#64748b'
@@ -187,8 +222,8 @@
 
        // Handle 401 - Unauthorized (token expired or invalid)
        if (response.status === 401) {
-           alert('Session expired. Please login again.');
-           logout();
+           showError('Session expired. Please login again.', 'Authentication Error');
+           setTimeout(() => logout(), 2000);
            return;
        }
 
@@ -1136,9 +1171,9 @@
        } catch (e) {
            console.error('Last run error:', e);
            if (e.message.includes('404')) {
-               alert(`No run history available for chain: ${name}\n\nThis chain hasn't been executed yet or the run history file is missing.`);
+               showError(`No run history available for chain: ${name}\n\nThis chain hasn't been executed yet or the run history file is missing.`, 'No Run History');
            } else {
-               alert(`Failed to load run history for: ${name}\n\nError: ${e.message}`);
+               showError(`Failed to load run history for: ${name}\n\nError: ${e.message}`, 'Load Failed');
            }
        }
    }
@@ -1216,7 +1251,10 @@
    function connectRunWs() {
        const runId = document.getElementById("runIdInput").value;
        const box = document.getElementById("runEvents");
-       if (!runId) return alert("Enter run_id");
+       if (!runId) {
+           showError("Please enter a run_id to monitor events", "Run ID Required");
+           return;
+       }
 
        if (runWs) runWs.close();
        box.textContent = `Connecting to Run ${runId}...\n`;
@@ -1400,20 +1438,42 @@
        renderUsers(filtered);
    }
 
-   function showAddUserModal() {
-       const username = prompt('Enter username:');
-       if (!username) return;
+   async function showAddUserModal() {
+       const result = await showInput({
+           title: 'Add New User',
+           subtitle: 'Create a new user account',
+           fields: [
+               {
+                   name: 'username',
+                   label: 'Username',
+                   type: 'text',
+                   placeholder: 'Enter username',
+                   required: true
+               },
+               {
+                   name: 'password',
+                   label: 'Password',
+                   type: 'password',
+                   placeholder: 'Enter password',
+                   required: true
+               },
+               {
+                   name: 'role',
+                   label: 'Role',
+                   type: 'select',
+                   defaultValue: 'developer',
+                   required: true,
+                   options: [
+                       { value: 'developer', label: 'Developer' },
+                       { value: 'admin', label: 'Admin' }
+                   ]
+               }
+           ]
+       });
 
-       const password = prompt('Enter password:');
-       if (!password) return;
-
-       const role = prompt('Enter role (admin/developer):', 'developer');
-       if (!role || !['admin', 'developer'].includes(role)) {
-           alert('Invalid role. Must be "admin" or "developer"');
-           return;
+       if (result) {
+           addUser(result.username, result.password, result.role);
        }
-
-       addUser(username, password, role);
    }
 
    async function addUser(username, password, role) {
@@ -1429,17 +1489,20 @@
                throw new Error(error.detail || 'Failed to add user');
            }
 
-           alert(`User "${username}" created successfully!`);
+           showSuccess(`User "${username}" created successfully! User will be prompted to change password on first login.`);
            loadUsers();
        } catch (e) {
-           alert('Error adding user: ' + e.message);
+           showError('Error adding user: ' + e.message, 'Add User Failed');
        }
    }
 
    async function deleteUser(username) {
-       if (!confirm(`Are you sure you want to delete user "${username}"?`)) {
-           return;
-       }
+       const confirmed = await showConfirm(
+           `Are you sure you want to delete user "${username}"? This action cannot be undone.`,
+           'Delete User'
+       );
+
+       if (!confirmed) return;
 
        try {
            const response = await fetch(`/api/v1/users/${username}`, {
@@ -1452,50 +1515,64 @@
                throw new Error(error.detail || 'Failed to delete user');
            }
 
-           alert(`User "${username}" deleted successfully!`);
+           showSuccess(`User "${username}" deleted successfully!`);
            loadUsers();
        } catch (e) {
-           alert('Error deleting user: ' + e.message);
+           showError('Error deleting user: ' + e.message, 'Delete User Failed');
        }
    }
 
-   function showEditUserModal(username, currentRole) {
-       let updateChoice = prompt(
-           `Edit user: ${username}\n\nWhat would you like to update?\n1. Change Role\n2. Reset Password\n3. Change Role and Reset Password\n\nEnter 1, 2, or 3:`,
-           '1'
-       );
+   async function showEditUserModal(username, currentRole) {
+       const result = await showInput({
+           title: `Edit User: ${username}`,
+           subtitle: 'Update role and/or reset password',
+           fields: [
+               {
+                   name: 'role',
+                   label: 'Role',
+                   type: 'select',
+                   defaultValue: currentRole,
+                   required: false,
+                   options: [
+                       { value: currentRole, label: `Keep as ${currentRole}` },
+                       { value: 'admin', label: 'Admin' },
+                       { value: 'developer', label: 'Developer' }
+                   ]
+               },
+               {
+                   name: 'password',
+                   label: 'New Password (leave empty to keep current)',
+                   type: 'password',
+                   placeholder: 'Enter new password or leave empty',
+                   required: false
+               }
+           ]
+       });
 
-       if (!updateChoice || !['1', '2', '3'].includes(updateChoice)) {
+       if (!result) return;
+
+       // Check if admin role change
+       if (username === 'admin' && result.role !== 'admin' && result.role !== currentRole) {
+           showError('Cannot change admin user role', 'Invalid Operation');
            return;
        }
 
-       let newRole = null;
-       let newPassword = null;
-
-       // Change role
-       if (updateChoice === '1' || updateChoice === '3') {
-           if (username === 'admin') {
-               alert('Cannot change admin user role');
-               return;
-           }
-
-           newRole = prompt(`Enter new role for ${username} (admin/developer):`, currentRole);
-           if (!newRole || !['admin', 'developer'].includes(newRole)) {
-               alert('Invalid role. Must be "admin" or "developer"');
-               return;
-           }
+       // Build updates object
+       const updates = {};
+       if (result.role && result.role !== currentRole && !result.role.includes('Keep as')) {
+           updates.role = result.role;
+       }
+       if (result.password && result.password.trim()) {
+           updates.password = result.password;
        }
 
-       // Reset password
-       if (updateChoice === '2' || updateChoice === '3') {
-           newPassword = prompt(`Enter new password for ${username}:`);
-           if (!newPassword) {
-               alert('Password cannot be empty');
-               return;
-           }
+       // Check if anything changed
+       if (Object.keys(updates).length === 0) {
+           showError('No changes made', 'Edit User');
+           return;
        }
 
-       updateUser(username, newRole, newPassword);
+       updateUser(username, updates.role || null, updates.password || null);
    }
 
    async function updateUser(username, newRole, newPassword) {
@@ -1520,10 +1597,10 @@
                message += '\nUser will be prompted to change password on next login.';
            }
 
-           alert(message);
+           showSuccess(message);
            loadUsers();
        } catch (e) {
-           alert('Error updating user: ' + e.message);
+           showError('Error updating user: ' + e.message, 'Update User Failed');
        }
    }
 

@@ -45,10 +45,34 @@ class DBManager:
         finally:
             conn.close()
 
-    def init_db(self):
-        logger.info(f"Initialising DB at {self.db_path}")
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+    def _should_seed(self) -> bool:
+        # Check schema_meta first
+        row = self.fetch_one("SELECT value FROM schema_meta WHERE key = 'seeded'")
+        if row and row["value"] == "true":
+            return False
 
+        # Fallback: admin user presence
+        admin = self.fetch_one("SELECT id FROM users WHERE username = 'admin'")
+        return admin is None
+
+    def _mark_seeded(self):
+        self.execute(
+            "INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)",
+            ("seeded", "true"),
+        )
+
+    def init_db(self):
+        is_new_db = not self.db_path.exists()
+        logger.info(f"Initialising DB at {self.db_path} (new={is_new_db})")
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+            """
+        )
         # 1. Roles Table
         self.execute(
             "CREATE TABLE IF NOT EXISTS roles (id INTEGER PRIMARY KEY, name TEXT UNIQUE)"
@@ -88,7 +112,42 @@ class DBManager:
         """
         )
 
-        self._seed_data()
+        # 5. Analytics Events Table
+        self.execute(
+            """
+            CREATE TABLE IF NOT EXISTS analytics_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts REAL NOT NULL,                  -- epoch seconds
+                event_type TEXT NOT NULL,          -- step_start, agent_start, etc
+                run_id TEXT,
+                chain_name TEXT,
+                agent_name TEXT,
+                step_id TEXT,
+                subscription_id TEXT NOT NULL
+            );
+            """
+        )
+
+        # Helpful indexes
+        self.execute(
+            "CREATE INDEX IF NOT EXISTS idx_analytics_ts ON analytics_events(ts)"
+        )
+        self.execute(
+            "CREATE INDEX IF NOT EXISTS idx_analytics_event_type ON analytics_events(event_type)"
+        )
+        self.execute(
+            "CREATE INDEX IF NOT EXISTS idx_analytics_chain ON analytics_events(chain_name)"
+        )
+        self.execute(
+            "CREATE INDEX IF NOT EXISTS idx_analytics_agent ON analytics_events(agent_name)"
+        )
+
+        if self._should_seed():
+            logger.info("Seed data not present, Seeding.")
+            self._seed_data()
+            self._mark_seeded()
+        else:
+            logger.info("Seed data already present, skipping.")
 
     def _seed_data(self):
         logger.info("Seeding roles and permissions...")

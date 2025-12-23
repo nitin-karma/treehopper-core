@@ -52,7 +52,7 @@ from treehopper.th_config import (
     DEFAULT_API_KEY,
     ensure_dirs,
 )
-
+from treehopper.visualizer.db_util import db
 from treehopper.logging import get_logger
 
 logger = get_logger()
@@ -1815,7 +1815,11 @@ def validate_routing_rules(cfg):
 
 
 def chain_entry(argv: List[str]) -> None:
+    logger.info("[treehopper_cli] Initialising the DB if not exists")
+    db.init_db()
+    logger.info("[treehopper_cli] Ensuring all directories exists")
     ensure_dirs()
+
     if not argv:
         print_chain_help()
         sys.exit(1)
