@@ -1,7 +1,12 @@
 import time
 from treehopper.visualizer.db_util import db
 from pathlib import Path
-from treehopper.th_config import TH_ROOT
+from treehopper.th_config import TH_ROOT, DB_DIR
+
+
+def analytics_db_available() -> bool:
+    db_dir = Path(TH_ROOT) / DB_DIR
+    return db_dir.exists()
 
 
 def get_subscription_id() -> str:

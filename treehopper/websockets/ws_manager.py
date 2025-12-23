@@ -7,7 +7,10 @@ import json
 from fastapi import WebSocket
 from treehopper.websockets.schema_guard import validate_event
 from treehopper.th_config import TH_ROOT
-from treehopper.visualizer.analytics_recorder import record_analytics_event
+from treehopper.visualizer.analytics_recorder import (
+    record_analytics_event,
+    analytics_db_available,
+)
 from treehopper.logging import get_logger
 
 logger = get_logger()
@@ -106,11 +109,13 @@ class WSManager:
         self._record_event(run_id, event)
 
         # B. Analytics sink (NEW)
-        try:
-            record_analytics_event(run_id, chain_name, event)
-        except Exception as e:
-            # Never break runtime because of analytics
-            logger.error("[analytics] failed:", e)
+        if analytics_db_available():
+            try:
+                record_analytics_event(run_id, chain_name, event)
+            except Exception as e:
+                # Never break runtime because of analytics
+                logger.error("[analytics] failed:", e)
+                pass
 
         # -------------------------------
         # Run scope
