@@ -52,7 +52,7 @@ jobs:
       # ----------------------------------
       - name: Run integration tests
         run: |
-          pytest tests/integration
+          pytest -s tests/integration
 
       # ----------------------------------
       # 3️⃣ REAL E2E (shell, not pytest)
