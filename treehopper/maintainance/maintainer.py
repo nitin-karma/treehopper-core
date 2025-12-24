@@ -310,7 +310,7 @@ def startup_maintenance():
 
     # Runtime File Rotation and maintainance
     RuntimeFileRotator(
-        root=Path(TH_ROOT),
+        root=Path(TH_ROOT / "runtime"),
         max_dir_mb=512,
         max_file_age_days=1,
     ).rotate()
@@ -339,7 +339,7 @@ def admin_cleanup_archives():
 
 
 def admin_rotate_files():
-    RuntimeFileRotator(Path(TH_ROOT)).rotate()
+    RuntimeFileRotator(Path(TH_ROOT) / "runtime").rotate()
 
 
 # ============================================================
