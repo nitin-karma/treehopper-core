@@ -53,7 +53,7 @@ def get_archive_dir() -> Path:
     return Path(TH_ROOT) / "archive"
 
 
-get_archive_dir().mkdir(parents=True, exist_ok=True)
+# get_archive_dir().mkdir(parents=True, exist_ok=True)
 
 
 # ============================================================
