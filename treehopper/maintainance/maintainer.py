@@ -19,7 +19,7 @@ Retention Defaults:
 """
 
 from __future__ import annotations
-
+import os
 import time
 import shutil
 import zipfile
@@ -299,6 +299,10 @@ def storage_metrics() -> Dict:
 
 
 def startup_maintenance():
+    # 🚫 NEVER run maintenance during tests or bootstrap
+    if os.getenv("TH_TEST_MODE") == "1":
+        logger.info("[maintainer] Skipping startup maintenance (TH_TEST_MODE)")
+        return
     logger.info("[maintainer] Startup maintenance begin")
 
     # DB Init
