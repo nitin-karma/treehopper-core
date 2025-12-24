@@ -35,6 +35,7 @@ from treehopper.th_config import (
     DB_CRIT_PCT,
     LIVE_DB_RETAIN_DAYS,
     ARCHIVE_RETAIN_DAYS,
+    ARCHIVE_DIR,
 )
 from treehopper.visualizer.db_util import db
 
@@ -50,7 +51,8 @@ def get_archive_dir() -> Path:
     Resolve archive directory dynamically from current TH_ROOT.
     This is critical for test isolation.
     """
-    return Path(TH_ROOT) / "archive"
+    # return Path(TH_ROOT) / "archive"
+    return ARCHIVE_DIR
 
 
 # get_archive_dir().mkdir(parents=True, exist_ok=True)
