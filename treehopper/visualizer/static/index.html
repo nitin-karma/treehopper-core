@@ -7,6 +7,7 @@
   <!--<link rel="shortcut icon" type="image/x-icon" href="/static/favicon.ico">-->
   <title>TreehopperAI Dashboard</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="loader.css">
 
   <!-- D3.js and Graphviz libraries -->
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
@@ -16,9 +17,13 @@
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
-  <!-- ADD THESE 2 LINES BEFORE script.js -->
+  <!-- Unified Theme Manager - Load FIRST for all pages -->
+  <script src="theme-manager.js"></script>
+
+  <!-- Modal System -->
   <link rel="stylesheet" href="modal-system.css">
   <script src="modal-system.js"></script>
+
   <!-- Our script - loaded in head with defer so functions are available for onclick -->
   <script defer src="script.js"></script>
 </head>
@@ -190,8 +195,8 @@
           <div class="analytics-header">
               <h2 class="analytics-title">📊 Analytics Dashboard</h2>
               <div class="time-window-selector">
-                  <button class="window-btn active" data-window="1h" onclick="changeTimeWindow('1h')">1 Hour</button>
-                  <button class="window-btn" data-window="24h" onclick="changeTimeWindow('24h')">24 Hours</button>
+                  <button class="window-btn" data-window="1h" onclick="changeTimeWindow('1h')">1 Hour</button>
+                  <button class="window-btn active" data-window="24h" onclick="changeTimeWindow('24h')">24 Hours</button>
                   <button class="window-btn" data-window="7d" onclick="changeTimeWindow('7d')">7 Days</button>
               </div>
           </div>
@@ -412,6 +417,21 @@
     <img src="treehopper_logo.png" alt="TreehopperAI Logo" class="footer-logo">
     <span>TreehopperAI</span>
   </footer>
+
+  <!-- Loading Overlay (Main Tab Switches) -->
+  <div id="loadingOverlay" class="loading-overlay">
+      <div class="loader-container">
+          <div class="spinner"></div>
+          <div class="loading-text">
+              <span class="loading-dots">Loading</span>
+          </div>
+      </div>
+  </div>
+
+  <!-- Progress Bar (Time Window Switches) -->
+  <div id="progressBar" class="progress-bar-container">
+      <div class="progress-bar"></div>
+  </div>
 
 </body>
 </html>

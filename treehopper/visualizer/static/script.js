@@ -63,6 +63,9 @@
       ======================================== */
 
    function switchTab(tabName) {
+       // Show loading overlay
+       showLoader();
+
        // Hide all tab contents
        document.querySelectorAll('.tab-content').forEach(tab => {
            tab.classList.remove('active');
@@ -89,9 +92,16 @@
        if (tabName === 'analytics') {
            setTimeout(() => {
                if (typeof loadAnalytics === 'function') {
-                   loadAnalytics();
+                   loadAnalytics().finally(() => {
+                       setTimeout(hideLoader, 300);
+                   });
+               } else {
+                   setTimeout(hideLoader, 300);
                }
-           }, 100);
+           }, 200); // Increased delay to ensure DOM is fully visible
+       } else {
+           // Hide loader after tab switch
+           setTimeout(hideLoader, 300);
        }
 
        // Save active tab to localStorage
@@ -277,24 +287,35 @@
       THEME MANAGEMENT
       ======================================== */
 
-   function toggleTheme() {
-       const isLight = document.body.classList.toggle('light-mode');
-       document.getElementById('themeIcon').textContent = isLight ? '🌙' : '☀️';
-       localStorage.setItem('theme', isLight ? 'light' : 'dark');
+   // Theme management is now handled by theme-manager.js
+   // This provides unified theme sync across all pages (dashboard, login, error)
 
-       // Reload analytics charts with new color scheme
-       setTimeout(() => {
-           if (typeof loadAnalytics === 'function') {
-               loadAnalytics();
-           }
-       }, 100);
+   function toggleTheme() {
+       // Get the global theme manager functions
+       const themeManager = {
+           getTheme: window.getTheme,
+           setTheme: window.setTheme,
+           applyTheme: window.applyTheme
+       };
+
+       // Toggle theme using theme manager
+       if (themeManager.getTheme && themeManager.setTheme) {
+           const currentTheme = themeManager.getTheme();
+           const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+           themeManager.setTheme(newTheme);
+
+           // Reload analytics charts with new color scheme
+           setTimeout(() => {
+               if (typeof loadAnalytics === 'function') {
+                   loadAnalytics();
+               }
+           }, 100);
+       }
    }
 
    function loadTheme() {
-       if (localStorage.getItem('theme') === 'light') {
-           document.body.classList.add('light-mode');
-           document.getElementById('themeIcon').textContent = '🌙';
-       }
+       // Theme auto-initializes from theme-manager.js
+       // No action needed here
    }
 
    /* ========================================
@@ -533,7 +554,75 @@
       ANALYTICS DASHBOARD
       ======================================== */
 
+   /* ========================================
+      LOADING INDICATORS
+      ======================================== */
+
+   // Full overlay loader (for main tabs)
+   function showLoader() {
+       const overlay = document.getElementById('loadingOverlay');
+       if (overlay) {
+           overlay.classList.add('active');
+       }
+   }
+
+   function hideLoader() {
+       const overlay = document.getElementById('loadingOverlay');
+       if (overlay) {
+           overlay.classList.remove('active');
+       }
+   }
+
+   // Progress bar (for time windows)
+   function showProgressBar() {
+       const container = document.getElementById('progressBar');
+       if (!container) return;
+
+       container.classList.add('active');
+       // Reset animation
+       const bar = container.querySelector('.progress-bar');
+       if (bar) {
+           bar.style.animation = 'none';
+           setTimeout(() => {
+               bar.style.animation = 'progress 0.8s ease-out';
+           }, 10);
+       }
+   }
+
+   function hideProgressBar() {
+       setTimeout(() => {
+           const container = document.getElementById('progressBar');
+           if (container) {
+               container.classList.remove('active');
+           }
+       }, 800);
+   }
+
+   // Make functions globally available
+   window.showLoader = showLoader;
+   window.hideLoader = hideLoader;
+   window.showProgressBar = showProgressBar;
+   window.hideProgressBar = hideProgressBar;
+
+   /* ========================================
+      ANALYTICS DATA LOADING
+      ======================================== */
+
    function changeTimeWindow(window) {
+       // Check if analytics tab is active
+       const analyticsTab = document.getElementById('tab-analytics');
+       if (!analyticsTab || !analyticsTab.classList.contains('active')) {
+           console.warn('Analytics tab not active, skipping time window change');
+           return;
+       }
+
+       console.log('🔄 Changing time window to:', window);
+       console.log('📊 Analytics tab active:', analyticsTab.classList.contains('active'));
+       console.log('🎨 Canvas before load:', document.getElementById('eventsPieChart') ? 'EXISTS' : 'MISSING');
+
+       // Show loader
+       showLoader();
+
        currentTimeWindow = window;
 
        document.querySelectorAll('.window-btn').forEach(btn => {
@@ -543,41 +632,68 @@
            }
        });
 
-       loadAnalytics();
+       loadAnalytics().finally(() => {
+           console.log('🎨 Canvas after load:', document.getElementById('eventsPieChart') ? 'EXISTS' : 'MISSING');
+           setTimeout(hideLoader, 400);
+       });
    }
+
+   // Make changeTimeWindow globally available
+   window.changeTimeWindow = changeTimeWindow;
 
    async function loadAnalytics() {
        try {
            const data = await apiFetch(`/api/v1/summary?window=${currentTimeWindow}`);
+           console.log("recieved analytics");
+           console.log(data);
+
+           // Check if data exists
+           if (!data) {
+               console.warn('No analytics data received');
+               return;
+           }
 
            updateKPIs(data);
-           renderEventsPieChart(data.events.by_type);
-           renderFilesPieChart(data.files.by_extension);
-           renderRunsDonutChart(data.runs);
-           renderChainsBarChart(data.chains.by_chain);
-           renderAgentsBarChart(data.agents.invocations);
-           renderTimelineChart(data.timeline.runs_per_hour);
+           renderEventsPieChart(data.events?.by_type || {});
+
+           // Only render files chart if data exists
+           if (data.files?.by_extension) {
+               renderFilesPieChart(data.files.by_extension);
+           } else {
+               showEmptyChart('filesPieChart', 'File tracking not enabled');
+           }
+
+           renderRunsDonutChart(data.runs || {});
+           renderChainsBarChart(data.chains?.by_chain || {});
+           renderAgentsBarChart(data.agents?.invocations || {});
+           renderTimelineChart(data.timeline?.runs_per_hour || []);
 
        } catch (e) {
            console.error('Failed to load analytics:', e);
+           showError('Failed to load analytics data. Please try again.', 'Analytics Error');
        }
    }
 
    function updateKPIs(data) {
-       document.getElementById('kpi-total-runs').textContent = data.runs.total.toLocaleString();
+       // Safely access nested properties with fallbacks
+       const runs = data?.runs || { total: 0, success: 0, failed: 0 };
+       const files = data?.files || { count: 0, total_size_mb: 0 };
+       const events = data?.events || { by_type: {} };
 
-       document.getElementById('kpi-success-runs').textContent = data.runs.success.toLocaleString();
-       const successRate = data.runs.total > 0
-           ? Math.round((data.runs.success / data.runs.total) * 100)
+       document.getElementById('kpi-total-runs').textContent = (runs.total || 0).toLocaleString();
+
+       document.getElementById('kpi-success-runs').textContent = (runs.success || 0).toLocaleString();
+       const successRate = runs.total > 0
+           ? Math.round((runs.success / runs.total) * 100)
            : 0;
        document.getElementById('kpi-success-rate').textContent = `${successRate}% success rate`;
 
-       document.getElementById('kpi-failed-runs').textContent = data.runs.failed.toLocaleString();
-       const errorCount = data.events.by_type.error || 0;
+       document.getElementById('kpi-failed-runs').textContent = (runs.failed || 0).toLocaleString();
+       const errorCount = events.by_type?.error || 0;
        document.getElementById('kpi-error-count').textContent = `${errorCount} total errors`;
 
-       document.getElementById('kpi-file-count').textContent = data.files.count.toLocaleString();
-       document.getElementById('kpi-file-size').textContent = `${data.files.total_size_mb} MB total`;
+       document.getElementById('kpi-file-count').textContent = (files.count || 0).toLocaleString();
+       document.getElementById('kpi-file-size').textContent = `${files.total_size_mb || 0} MB total`;
    }
 
    function destroyChart(chartId) {
@@ -587,20 +703,63 @@
        }
    }
 
+   // Helper function to safely get chart canvas and show empty state
+   function getChartCanvas(chartId, emptyMessage = 'No data available') {
+       const canvas = document.getElementById(chartId);
+       if (!canvas) {
+           console.warn(`Chart canvas '${chartId}' not found in DOM`);
+           return null;
+       }
+
+       // Show canvas and hide empty message if it exists
+       canvas.style.display = 'block';
+       const parent = canvas.parentElement;
+       if (parent) {
+           const emptyDiv = parent.querySelector('.chart-empty');
+           if (emptyDiv) {
+               emptyDiv.style.display = 'none';
+           }
+       }
+
+       return canvas;
+   }
+
+   function showEmptyChart(chartId, message) {
+       const canvas = document.getElementById(chartId);
+       if (!canvas) return;
+
+       const parent = canvas.parentElement;
+       if (!parent) return;
+
+       // Don't destroy the canvas! Just hide it and show message
+       // Check if empty message div already exists
+       let emptyDiv = parent.querySelector('.chart-empty');
+       if (!emptyDiv) {
+           emptyDiv = document.createElement('div');
+           emptyDiv.className = 'chart-empty';
+           parent.appendChild(emptyDiv);
+       }
+
+       emptyDiv.textContent = message;
+       emptyDiv.style.display = 'flex';
+       canvas.style.display = 'none';
+   }
+
    function renderEventsPieChart(data) {
        const chartId = 'eventsPieChart';
        destroyChart(chartId);
 
        if (!data || Object.keys(data).length === 0) {
-           document.getElementById(chartId).parentElement.innerHTML =
-               '<div class="chart-empty">No event data available</div>';
+           showEmptyChart(chartId, 'No event data available');
            return;
        }
 
-       const colors = getColorScheme();
-       const ctx = document.getElementById(chartId);
+       const canvas = getChartCanvas(chartId);
+       if (!canvas) return;
 
-       charts[chartId] = new Chart(ctx, {
+       const colors = getColorScheme();
+
+       charts[chartId] = new Chart(canvas, {
            type: 'pie',
            data: {
                labels: Object.keys(data),
@@ -642,15 +801,16 @@
        destroyChart(chartId);
 
        if (!data || Object.keys(data).length === 0) {
-           document.getElementById(chartId).parentElement.innerHTML =
-               '<div class="chart-empty">No file data available</div>';
+           showEmptyChart(chartId, 'No file data available');
            return;
        }
 
-       const colors = getColorScheme();
-       const ctx = document.getElementById(chartId);
+       const canvas = getChartCanvas(chartId);
+       if (!canvas) return;
 
-       charts[chartId] = new Chart(ctx, {
+       const colors = getColorScheme();
+
+       charts[chartId] = new Chart(canvas, {
            type: 'pie',
            data: {
                labels: Object.keys(data),
@@ -692,15 +852,16 @@
        destroyChart(chartId);
 
        if (!data || data.total === 0) {
-           document.getElementById(chartId).parentElement.innerHTML =
-               '<div class="chart-empty">No run data available</div>';
+           showEmptyChart(chartId, 'No run data available');
            return;
        }
 
-       const colors = getColorScheme();
-       const ctx = document.getElementById(chartId);
+       const canvas = getChartCanvas(chartId);
+       if (!canvas) return;
 
-       charts[chartId] = new Chart(ctx, {
+       const colors = getColorScheme();
+
+       charts[chartId] = new Chart(canvas, {
            type: 'doughnut',
            data: {
                labels: ['Success', 'Failed'],
@@ -750,19 +911,20 @@
        destroyChart(chartId);
 
        if (!data || Object.keys(data).length === 0) {
-           document.getElementById(chartId).parentElement.innerHTML =
-               '<div class="chart-empty">No chain data available</div>';
+           showEmptyChart(chartId, 'No chain data available');
            return;
        }
 
+       const canvas = getChartCanvas(chartId);
+       if (!canvas) return;
+
        const colors = getColorScheme();
-       const ctx = document.getElementById(chartId);
 
        const sorted = Object.entries(data).sort((a, b) => b[1] - a[1]);
        const labels = sorted.map(([name]) => name);
        const values = sorted.map(([, count]) => count);
 
-       charts[chartId] = new Chart(ctx, {
+       charts[chartId] = new Chart(canvas, {
            type: 'bar',
            data: {
                labels: labels,
@@ -810,19 +972,20 @@
        destroyChart(chartId);
 
        if (!data || Object.keys(data).length === 0) {
-           document.getElementById(chartId).parentElement.innerHTML =
-               '<div class="chart-empty">No agent data available</div>';
+           showEmptyChart(chartId, 'No agent data available');
            return;
        }
 
+       const canvas = getChartCanvas(chartId);
+       if (!canvas) return;
+
        const colors = getColorScheme();
-       const ctx = document.getElementById(chartId);
 
        const sorted = Object.entries(data).sort((a, b) => b[1] - a[1]);
        const labels = sorted.map(([name]) => name);
        const values = sorted.map(([, count]) => count);
 
-       charts[chartId] = new Chart(ctx, {
+       charts[chartId] = new Chart(canvas, {
            type: 'bar',
            data: {
                labels: labels,
@@ -870,18 +1033,19 @@
        destroyChart(chartId);
 
        if (!data || data.length === 0) {
-           document.getElementById(chartId).parentElement.innerHTML =
-               '<div class="chart-empty">No timeline data available</div>';
+           showEmptyChart(chartId, 'No timeline data available');
            return;
        }
 
+       const canvas = getChartCanvas(chartId);
+       if (!canvas) return;
+
        const colors = getColorScheme();
-       const ctx = document.getElementById(chartId);
 
        const labels = data.map(d => d.hour);
        const values = data.map(d => d.count);
 
-       charts[chartId] = new Chart(ctx, {
+       charts[chartId] = new Chart(canvas, {
            type: 'line',
            data: {
                labels: labels,
@@ -1734,6 +1898,16 @@
        loadInputFiles();
        initLiveEvents();
 
+       // Sync time window button state with default (24h)
+       setTimeout(() => {
+           document.querySelectorAll('.window-btn').forEach(btn => {
+               btn.classList.remove('active');
+               if (btn.dataset.window === currentTimeWindow) {
+                   btn.classList.add('active');
+               }
+           });
+       }, 100);
+
        // Load analytics dashboard
        loadAnalytics();
 
@@ -1747,7 +1921,12 @@
        updateInterval = setInterval(() => {
            loadState();
            loadInputFiles();
-           loadAnalytics();
+
+           // Only refresh analytics if analytics tab is active
+           const analyticsTab = document.getElementById('tab-analytics');
+           if (analyticsTab && analyticsTab.classList.contains('active')) {
+               loadAnalytics();
+           }
        }, 30000);
    }
 

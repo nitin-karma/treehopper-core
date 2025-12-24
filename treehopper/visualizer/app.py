@@ -18,19 +18,22 @@ import json
 import asyncio
 import yaml
 from datetime import datetime
-from collections import Counter, defaultdict
-from typing import Counter as CounterType, Dict, Any
+
+# from collections import Counter, defaultdict
+from typing import Any
 import time
 from treehopper.visualizer.state import snapshot
 from treehopper.visualizer.log_tail import read_logs
 from treehopper.visualizer.db_util import db
 from treehopper.visualizer.user_routes import router as user_router
+from treehopper.visualizer.summary_utils import _build_summary, _file_stats
 from treehopper.logging import metrics
+from treehopper.maintainance.maintainer import storage_metrics
 from treehopper.th_config import (
     TH_ROOT,
     LOG_RENDER_LIMIT,
     DASHBOARD_HEADER,
-    LOG_SCHEDULE,
+    # LOG_SCHEDULE,
 )
 from treehopper.logging import get_logger
 
@@ -700,247 +703,36 @@ def recursive_format(data: Any) -> Any:
         return format_value(data)
 
 
-# Mock summary implementation
-# @app.get("/api/v1/summary")
-# def get_summary(window: str = Query("24h", enum=["1h", "24h", "7d"])):
-#     now = int(time.time())
-#     logger.info(now)
-
-#     MOCK = {
-#         "1h": {
-#             "time_window": "1h",
-#             "runs": {"total": 4, "success": 3, "failed": 1},
-#             "chains": {
-#                 "by_chain": {
-#                     "simple_doc_flow": 2,
-#                     "doc_intel": 2,
-#                 }
-#             },
-#             "agents": {
-#                 "invocations": {
-#                     "pdf_extractor": 4,
-#                     "content_analyzer": 3,
-#                     "report_generator": 2,
-#                     "keyword_extractor": 1,
-#                 }
-#             },
-#             "files": {
-#                 "count": 2,
-#                 "total_size_mb": 0.01,
-#                 "by_extension": {"pdf": 1, "txt": 1},
-#             },
-#             "events": {
-#                 "by_type": {
-#                     "run_started": 4,
-#                     "agent_start": 10,
-#                     "agent_complete": 9,
-#                     "run_completed": 4,
-#                 }
-#             },
-#             "timeline": {
-#                 "runs_per_minute": [
-#                     {"minute": "10:05", "count": 1},
-#                     {"minute": "10:12", "count": 2},
-#                     {"minute": "10:40", "count": 1},
-#                 ]
-#             },
-#         },
-#         "24h": {
-#             "time_window": "24h",
-#             "runs": {"total": 1000000, "success": 1500000000, "failed": 300000000},
-#             "chains": {
-#                 "by_chain": {
-#                     "simple_doc_flow": 6,
-#                     "doc_intel": 8,
-#                     "dynamic_doc_intel": 4,
-#                 }
-#             },
-#             "agents": {
-#                 "invocations": {
-#                     "pdf_extractor": 32,
-#                     "content_analyzer": 28,
-#                     "report_generator": 20,
-#                     "keyword_extractor": 14,
-#                     "teams_notifier": 4,
-#                 }
-#             },
-#             "files": {
-#                 "count": 9,
-#                 "total_size_mb": 0.12,
-#                 "by_extension": {"pdf": 6, "txt": 3},
-#             },
-#             "events": {
-#                 "by_type": {
-#                     "run_started": 18,
-#                     "agent_start": 98,
-#                     "agent_complete": 95,
-#                     "step_complete": 40,
-#                     "run_completed": 18,
-#                 }
-#             },
-#             "timeline": {
-#                 "runs_per_hour": [
-#                     {"hour": "02:00", "count": 2},
-#                     {"hour": "06:00", "count": 3},
-#                     {"hour": "10:00", "count": 7},
-#                     {"hour": "14:00", "count": 4},
-#                     {"hour": "18:00", "count": 2},
-#                 ]
-#             },
-#         },
-#         "7d": {
-#             "time_window": "7d",
-#             "runs": {"total": 76, "success": 68, "failed": 8},
-#             "chains": {
-#                 "by_chain": {
-#                     "simple_doc_flow": 20,
-#                     "doc_intel": 32,
-#                     "dynamic_doc_intel": 24,
-#                 }
-#             },
-#             "agents": {
-#                 "invocations": {
-#                     "pdf_extractor": 180,
-#                     "content_analyzer": 150,
-#                     "report_generator": 96,
-#                     "keyword_extractor": 70,
-#                     "teams_notifier": 18,
-#                 }
-#             },
-#             "files": {
-#                 "count": 34,
-#                 "total_size_mb": 0.84,
-#                 "by_extension": {"pdf": 21, "txt": 9, "csv": 4},
-#             },
-#             "events": {
-#                 "by_type": {
-#                     "run_started": 76,
-#                     "agent_start": 514,
-#                     "agent_complete": 501,
-#                     "step_complete": 230,
-#                     "run_completed": 76,
-#                 }
-#             },
-#             "timeline": {
-#                 "runs_per_day": [
-#                     {"day": "Mon", "count": 10},
-#                     {"day": "Tue", "count": 14},
-#                     {"day": "Wed", "count": 9},
-#                     {"day": "Thu", "count": 13},
-#                     {"day": "Fri", "count": 16},
-#                     {"day": "Sat", "count": 8},
-#                     {"day": "Sun", "count": 6},
-#                 ]
-#             },
-#         },
-#     }
-
-#     return recursive_format(MOCK[window])
+@app.get("/admin/storage")
+def admin_storage():
+    return storage_metrics()
 
 
-# 1 Original implementation
-# @app.get("/api/v1/summary")
-# def get_summary(window: str = Query("24h", enum=LOG_SCHEDULE)):
-
-#     now = time.time()
-#     window_sec = {"1h": 3600, "24h": 86400, "7d": 604800}[window]
-#     cutoff = now - window_sec
-
-#     # -------------------------------------------------
-#     # 1. Parse runtime events
-#     # -------------------------------------------------
-#     event_counts: CounterType[str] = Counter()
-#     chain_counts: CounterType[str] = Counter()
-#     agent_counts: CounterType[str] = Counter()
-#     runs_success: int = 0
-#     runs_failed: int = 0
-#     timeline: Dict[str, int] = defaultdict(int)
-
-#     if WS_EVENTS_DIR.exists():
-#         for f in WS_EVENTS_DIR.glob("*.jsonl"):
-#             with open(f, "r") as fh:
-#                 for line in fh:
-#                     try:
-#                         ev = json.loads(line)
-#                     except Exception:
-#                         continue
-
-#                     raw_ts = ev.get("ts") or ev.get("timestamp")
-#                     ts = normalize_ts(raw_ts)
-#                     if ts is None:
-#                         print("[summary] Skipping event with invalid ts:", raw_ts)
-
-#                     if ts is None or ts < cutoff:
-#                         continue
-
-#                     etype = ev.get("type")
-#                     event_counts[etype] += 1
-
-#                     if "chain" in ev:
-#                         chain_counts[ev["chain"]] += 1
-
-#                     if "agent" in ev:
-#                         agent_counts[ev["agent"]] += 1
-
-#                     if etype == "run_completed":
-#                         runs_success += 1
-#                     if etype == "error":
-#                         runs_failed += 1
-
-#                     if ts:
-#                         hour = time.strftime("%H:00", time.localtime(ts))
-#                         timeline[hour] += 1
-
-#     # -------------------------------------------------
-#     # 2. Shared files stats (reuse existing endpoint logic)
-#     # -------------------------------------------------
-#     shared_dir = REGISTRY_DIR / "shared"
-#     file_ext: CounterType[str] = Counter()
-#     total_size = 0
-#     file_count = 0
-
-#     if shared_dir.exists():
-#         for p in shared_dir.rglob("*"):
-#             if p.is_file():
-#                 file_count += 1
-#                 total_size += p.stat().st_size
-#                 ext = p.suffix.lstrip(".") or "unknown"
-#                 file_ext[ext] += 1
-
-#     # -------------------------------------------------
-#     # 3. Response
-#     # -------------------------------------------------
-#     res = {
-#         "time_window": window,
-#         "runs": {
-#             "total": runs_success + runs_failed,
-#             "success": runs_success,
-#             "failed": runs_failed,
-#         },
-#         "chains": {"by_chain": dict(chain_counts)},
-#         "agents": {"invocations": dict(agent_counts)},
-#         "files": {
-#             "count": file_count,
-#             "total_size_mb": round(total_size / (1024 * 1024), 2),
-#             "by_extension": dict(file_ext),
-#         },
-#         "events": {"by_type": dict(event_counts)},
-#         "timeline": {
-#             "runs_per_hour": [
-#                 {"hour": h, "count": c} for h, c in sorted(timeline.items())
-#             ]
-#         },
-#     }
-#     logger.info(res)
-#     return res
-
-
+# FIXED: Accept window parameter and return only that data
 @app.get("/api/v1/summary")
-def get_summary(window: str = Query("24h", enum=LOG_SCHEDULE)):
-    now = time.time()
-    window_sec = {"1h": 3600, "24h": 86400, "7d": 604800}[window]
-    cutoff = now - window_sec
+def get_summary(window: str = Query("24h", regex="^(1h|24h|7d)$")):
+    """
+    Get analytics summary for specified time window.
 
+    Args:
+        window: Time window - one of: 1h, 24h, 7d (default: 24h)
+
+    Returns:
+        Analytics summary for the requested time window
+    """
+    now = time.time()
+
+    window_seconds = {
+        "1h": 3600,
+        "24h": 86400,
+        "7d": 604800,
+    }
+
+    # Get seconds for requested window
+    seconds = window_seconds.get(window, 86400)  # default to 24h
+    cutoff = now - seconds
+
+    # Fetch data for requested window
     rows = db.fetch_all(
         """
         SELECT *
@@ -950,49 +742,18 @@ def get_summary(window: str = Query("24h", enum=LOG_SCHEDULE)):
         (cutoff,),
     )
 
-    runs = set()
-    runs_success = 0
-    runs_failed = 0
+    # Build summary for this window
+    summary = _build_summary(rows, window)
 
-    chain_counts: CounterType[str] = Counter()
-    agent_counts: CounterType[str] = Counter()
-    event_counts: CounterType[str] = Counter()
-    timeline: Dict[str, int] = defaultdict(int)
+    # Inject shared files info
+    files_summary = _file_stats()
+    summary["files"] = files_summary
 
-    for r in rows:
-        event_counts[r["event_type"]] += 1
+    logger.info(f"Analytics for window={window}")
+    logger.info(summary)
 
-        if r["chain_name"]:
-            chain_counts[r["chain_name"]] += 1
-
-        if r["agent_name"]:
-            agent_counts[r["agent_name"]] += 1
-
-        if r["run_id"]:
-            runs.add(r["run_id"])
-
-        if r["event_type"] == "run_completed":
-            runs_success += 1
-
-        hour = time.strftime("%H:00", time.localtime(r["ts"]))
-        timeline[hour] += 1
-
-    return {
-        "time_window": window,
-        "runs": {
-            "total": len(runs),
-            "success": runs_success,
-            "failed": runs_failed,
-        },
-        "chains": {"by_chain": dict(chain_counts)},
-        "agents": {"invocations": dict(agent_counts)},
-        "events": {"by_type": dict(event_counts)},
-        "timeline": {
-            "runs_per_hour": [
-                {"hour": h, "count": c} for h, c in sorted(timeline.items())
-            ]
-        },
-    }
+    # Return data directly (not nested in window key)
+    return summary
 
 
 # -------------------------------------------------------------------

@@ -177,3 +177,19 @@ PERM = ["manage_users", "view_dashboard", "execute_chains"]
 DASHBOARD_HEADER = "TreehopperDash"
 ACCESS_TOKEN_EXPIRE_MINUTES = 600
 LOG_SCHEDULE = ["1h", "24h", "7d"]
+
+
+# =====================
+# Maintainanace config
+# =====================
+DB_MAX_MB = 2048
+DB_WARN_PCT = 80
+DB_CRIT_PCT = 95
+
+LIVE_DB_RETAIN_DAYS = 7
+ARCHIVE_RETAIN_DAYS = 90
+
+FILE_ROTATE_MAX_MB = 512
+FILE_ROTATE_MAX_COUNT = 1000
+
+ARCHIVE_DIR = Path(TH_ROOT) / "archive"

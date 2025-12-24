@@ -26,6 +26,8 @@ from treehopper.chains_agents_refresh_status import (
 from treehopper.whatis import print_whatis
 from treehopper.th_ui_cli import launch_ui, stop_ui
 from treehopper.visualizer.db_util import db
+from treehopper.admin_cli import admin_entry
+from treehopper.maintainance.maintainer import startup_maintenance
 
 # ==============================================================================
 # GLOBAL OVERRIDE FOR DEVELOPMENT
@@ -1218,8 +1220,14 @@ Treehopper CLI Commands
 def main() -> None:
     logger.info("[treehopper_cli] Initialising the DB if not exists")
     db.init_db()
+
     logger.info("[treehopper_cli] Ensuring all directories exists")
     ensure_dirs()
+
+    logger.info("[treehopper_cli] Ensuring maintaince checks and actions")
+    # ✅ SAFE, FAST, ONE-TIME
+    startup_maintenance()
+
     if len(sys.argv) == 1:
         print_whatis()
         return
@@ -1449,7 +1457,12 @@ def main() -> None:
         else:
             print(f"Unknown launch target: {target}")
             sys.exit(1)
-
+    elif cmd == "admin":
+        logger.info("admin command")
+        if len(sys.argv) < 3:
+            print("Usage: treehopper admin <action>")
+            sys.exit(1)
+        admin_entry(sys.argv[2:])
     else:
         logger.info(f"Unknown command: {cmd}")
         print(f"Unknown command: {cmd}")

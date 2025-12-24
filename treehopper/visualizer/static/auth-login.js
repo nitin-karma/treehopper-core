@@ -8,21 +8,9 @@ let userNeedsPasswordChange = false;
    THEME MANAGEMENT
    ======================================== */
 
-function toggleTheme() {
-    const isLight = document.body.classList.toggle('light-mode');
-    document.getElementById('themeIcon').textContent = isLight ? '🌙' : '☀️';
-    localStorage.setItem('loginTheme', isLight ? 'light' : 'dark');
-}
-
-function loadTheme() {
-    if (localStorage.getItem('loginTheme') === 'light') {
-        document.body.classList.add('light-mode');
-        document.getElementById('themeIcon').textContent = '🌙';
-    }
-}
-
-// Load theme on page load
-loadTheme();
+// Theme management is now handled by theme-manager.js
+// This ensures theme sync with dashboard and error pages
+// No need for local theme functions - theme-manager.js handles everything
 
 /* ========================================
    PASSWORD VISIBILITY TOGGLE

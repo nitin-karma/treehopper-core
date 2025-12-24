@@ -54,6 +54,7 @@ from treehopper.th_config import (
 )
 from treehopper.visualizer.db_util import db
 from treehopper.logging import get_logger
+from treehopper.maintainance.maintainer import startup_maintenance
 
 logger = get_logger()
 logger.info("Inside Treehopper chains")
@@ -1815,10 +1816,13 @@ def validate_routing_rules(cfg):
 
 
 def chain_entry(argv: List[str]) -> None:
-    logger.info("[treehopper_cli] Initialising the DB if not exists")
+    logger.info("[treehopper_chains] Initialising the DB if not exists")
     db.init_db()
-    logger.info("[treehopper_cli] Ensuring all directories exists")
+    logger.info("[treehopper_chains] Ensuring all directories exists")
     ensure_dirs()
+    logger.info("[treehopper_chains] Ensuring maintaince checks and actions")
+    # ✅ SAFE, FAST, ONE-TIME
+    startup_maintenance()
 
     if not argv:
         print_chain_help()
