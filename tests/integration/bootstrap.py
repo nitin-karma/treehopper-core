@@ -1,5 +1,4 @@
 # tests/integration/bootstrap.py
-
 import os
 import subprocess
 from pathlib import Path
@@ -11,10 +10,7 @@ def th(cmd: list[str], env: dict):
 
 def bootstrap_treehopper(root: Path):
     env = os.environ.copy()
-    # print("Env before test")
-    # print("*"*100)
-    # print(env)
-    # print("*"*100)
+
     env["TH_ROOT"] = str(root)
     env["TREEHOPPER_RUNTIME_DIR"] = str(root / "runtime")
     env["TREEHOPPER_CANCEL_DIR"] = str(root / "runtime" / "cancels")
@@ -22,10 +18,6 @@ def bootstrap_treehopper(root: Path):
     env["TH_TEST_MODE"] = "1"
     env["TH_LLM_PROVIDER"] = "mock"
 
-    # print("Env setup for test")
-    # print("*"*100)
-    # print(env)
-    # print("*"*100)
     # -------------------
     # Build agents
     # -------------------
@@ -77,9 +69,7 @@ def bootstrap_treehopper(root: Path):
     # -------------------
     # Push test file
     # -------------------
-    th(["push-file", "pdf_extractor", "examples/files/contract.pdf"], env)
-
-    # th(["restart"], env)
-    from treehopper.registry import reload_registry
-
-    reload_registry()
+    th(
+        ["push-file", "pdf_extractor", "examples/files/contract.pdf"],
+        env,
+    )

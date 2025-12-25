@@ -1,44 +1,36 @@
 # treehopper/treehopper.py
 import os
-
-if os.getenv("TREEHOPPER_RUNTIME_MODE") == "1":
-    CHROMA_DISABLED = True
-else:
-    CHROMA_DISABLED = False
-from datetime import datetime
 import sys
-import traceback
-from pathlib import Path
-import importlib.util
-from importlib.abc import Loader
-from types import ModuleType
-import inspect
 import json
+import inspect
+import traceback
 import subprocess
+from datetime import datetime
+from pathlib import Path
+from types import ModuleType
+from importlib.abc import Loader
+import importlib.util
+from typing import Any
 from fastapi import FastAPI, Request, APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.security import APIKeyHeader
 
-# REMOVED: from fastapi.openapi.utils import get_openapi
 from dotenv import load_dotenv
 import chromadb
-
-from typing import Any
 import yaml
 from pydantic import BaseModel
 
-# local imports
+# -------------------------------------------------------
+# LOCAL IMPORTS
+# -------------------------------------------------------
 from treehopper.utils.run_registry import (
     record_chain_run,
     list_chain_runs as rr_list_chain_runs,
-    # REMOVED: get_chain_run as rr_get_chain_run,
 )
 from treehopper.utils.config import read_config
 from treehopper.th_config import (
-    # REMOVED: HOME,
-    # REMOVED: TH_ROOT,
     REGISTRY_AGENTS,
     REGISTRY_DIR,
     REGISTRY_AGENTS_INDEX,
@@ -47,38 +39,36 @@ from treehopper.th_config import (
     VERSION,
 )
 from treehopper.logging import get_logger
+from treehopper.utils.commons import load_chains_index
 
-logger = get_logger()
-logger.info("Inside Main Server")
+# -------------------------------------------------------
+# ENV / FLAGS
+# -------------------------------------------------------
 load_dotenv()
 
-# -------------------------------------------------------
-# FASTAPI ROOT
-# -------------------------------------------------------
-app = FastAPI(
-    title="Treehopper Agentic API",
-    docs_url=None,
-    redoc_url=None,
-    version=VERSION,
-)
+CHROMA_DISABLED = os.getenv("TREEHOPPER_RUNTIME_MODE") == "1"
+TH_TEST_MODE = os.getenv("TH_TEST_MODE") == "1"
 
+logger = get_logger()
 
 # -------------------------------------------------------
-# simple memory / chroma init (unchanged)
+# GLOBAL STATE (SAFE)
+# -------------------------------------------------------
+agents: dict[str, dict] = {}
+AGENT_PATH_MAP: dict[str, dict] = {}
+
+# -------------------------------------------------------
+# CHROMA MEMORY (unchanged behaviour)
 # -------------------------------------------------------
 if not CHROMA_DISABLED:
-    TH_TEST_MODE = os.getenv("TH_TEST_MODE") == "1"
-
     if TH_TEST_MODE:
         memory = chromadb.EphemeralClient()
     else:
         memory = chromadb.PersistentClient(path=".treehopper_memory")
-
     collection = memory.get_or_create_collection("treehopper_memory")
 
-
 # -------------------------------------------------------
-# ROUTERS + API key header
+# ROUTERS
 # -------------------------------------------------------
 api_key_header = APIKeyHeader(name="x-api-key", auto_error=False)
 
@@ -102,28 +92,14 @@ router_chains = APIRouter(
 
 router_sys = APIRouter(prefix="/api/v1/sys", tags=["System"])
 
-# developer-facing agents list (keeps route + metadata)
-agents: dict[str, dict] = {}
-
-# NEW: global mapping used by runtimes to call handlers by path
-# AGENT_PATH_MAP[path] = {
-#   "handler": async callable that accepts a single dict `params`,
-#   "orig": original function,
-#   "method": "GET"/"POST",
-#   "body_model": pydantic model class or None
-# }
-AGENT_PATH_MAP: dict[str, dict] = {}
-
 
 # -------------------------------------------------------
-# AGENT DECORATOR (routes go to router_agents)
+# AGENT DECORATOR (UNCHANGED SEMANTICS)
 # -------------------------------------------------------
 def agent(
     path: str, method: str = "GET", goal: str = "", tags: list[str] | None = None
 ):
-    if tags is None:
-        tags = []
-
+    tags = tags or []
     full_path = (
         path
         if path.startswith("/api/v1/agents/")
@@ -131,84 +107,59 @@ def agent(
     )
 
     def decorator(func):
-        # register in agents mapping for dev listing
-        agents[full_path] = {"func": func, "method": method, "goal": goal, "tags": tags}
+        agents[full_path] = {
+            "func": func,
+            "method": method.upper(),
+            "goal": goal,
+            "tags": tags,
+        }
 
-        # inspect signature to detect pydantic body param
         sig = inspect.signature(func)
-        body_param_name = None
+        body_param = None
         body_model = None
 
-        # Expectation (Option-2): handler accepts a single payload param annotated with a Pydantic model
-        # Find first param whose annotation has __fields__ (pydantic) or is subclass of BaseModel
         for pname, p in sig.parameters.items():
             ann = p.annotation
             if inspect.isclass(ann) and issubclass(ann, BaseModel):
-                body_param_name = pname
+                body_param = pname
                 body_model = ann
                 break
-            # duck-type: pydantic BaseModel also exposes __fields__
             if hasattr(ann, "__fields__"):
-                body_param_name = pname
+                body_param = pname
                 body_model = ann
                 break
 
-        # Build a runtime wrapper that accepts a dict of params and calls the original func
-        async def handler_for_runtime(params: dict):
-            """
-            Called by runtime (run_agent_path). Receives a dict `params`
-            built from chain inputs. This function:
-              - Instantiates the pydantic model if declared
-              - Calls the original handler as orig(payload=model_instance)
-            """
+        async def runtime_handler(params: dict):
             try:
-                call_kwargs = {}
+                kwargs = {}
                 if body_model:
-                    try:
-                        model_instance = body_model(**params)
-                    except Exception as e:
-                        # surface model validation errors clearly
-                        raise RuntimeError(
-                            f"Failed to build payload model {body_model}: {e}"
-                        )
-                    call_kwargs[body_param_name] = model_instance
+                    kwargs[body_param] = body_model(**params)
                 else:
-                    # fallback: pass entire params as `payload` if the handler expects a single arg named 'payload'
-                    # or if no pydantic model is annotated, call with payload=params
-                    # find a sensible single-arg name
                     if len(sig.parameters) == 1:
-                        pname = next(iter(sig.parameters.keys()))
-                        call_kwargs[pname] = params
+                        kwargs[next(iter(sig.parameters))] = params
                     else:
-                        # For multiple primitive params, try to map by name
-                        for pname in sig.parameters.keys():
-                            if pname in params:
-                                call_kwargs[pname] = params[pname]
+                        for k in sig.parameters:
+                            if k in params:
+                                kwargs[k] = params[k]
 
                 if inspect.iscoroutinefunction(func):
-                    return await func(**call_kwargs)
-                else:
-                    return func(**call_kwargs)
+                    return await func(**kwargs)
+                return func(**kwargs)
             except Exception:
-                # Keep traceback for debugging (runtime logs)
                 traceback.print_exc()
                 raise
 
-        # register wrapper into AGENT_PATH_MAP (runtime call path)
         AGENT_PATH_MAP[full_path] = {
-            "handler": handler_for_runtime,
+            "handler": runtime_handler,
             "orig": func,
             "method": method.upper(),
-            "body_model": body_model,
-            "body_param_name": body_param_name,
         }
 
-        # Register into FastAPI router as before (route handlers will still be the original function)
-        route_path = full_path.replace("/api/v1/agents", "") or "/"
+        route = full_path.replace("/api/v1/agents", "") or "/"
         if method.upper() == "GET":
-            router_agents.get(route_path, tags=tags)(func)
+            router_agents.get(route, tags=tags)(func)
         else:
-            router_agents.post(route_path, tags=tags)(func)
+            router_agents.post(route, tags=tags)(func)
 
         return func
 
@@ -216,281 +167,7 @@ def agent(
 
 
 # -------------------------------------------------------
-# Auto-resume on server startup (unchanged)
-# -------------------------------------------------------
-@app.on_event("startup")
-async def maybe_auto_resume():
-    cfg = read_config()
-    if not cfg.get("auto_resume"):
-        return
-    for folder in CHAINS_DIR.iterdir():
-        last = folder / "last_run.json"
-        if not last.exists():
-            continue
-        try:
-            data = json.loads(last.read_text())
-        except Exception:
-            continue
-        if data.get("status") in ("running", "failed", "pending") and not data.get(
-            "cancelled"
-        ):
-            run_id = data["run_id"]
-            subprocess.Popen(["treehopper", "chain", "resume", run_id])
-
-
-# -------------------------------------------------------
-# FAVICON & DOCS (unchanged)
-# -------------------------------------------------------
-STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
-if os.path.isdir(STATIC_DIR):
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
-
-@app.get("/favicon.ico", include_in_schema=False)
-async def favicon():
-    return FileResponse(os.path.join(STATIC_DIR, "treehopper_favicon.png"))
-
-
-@app.get("/docs", include_in_schema=False)
-async def custom_docs():
-    return get_swagger_ui_html(
-        openapi_url="/openapi.json",
-        title="Treehopper Agentic API",
-        swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
-        swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
-        swagger_favicon_url="/static/treehopper_favicon.png",
-    )
-
-
-# -------------------------------------------------------
-# AUTH MIDDLEWARE (unchanged)
-# -------------------------------------------------------
-@app.middleware("http")
-async def auth_middleware(request: Request, call_next):
-    public_exact = {
-        "/",
-        "/favicon",
-        "/favicon.ico",
-        "/docs",
-        "/openapi.json",
-        "/health",
-        "/version",
-        "/api/v1/sys/health",
-        "/api/v1/sys/version",
-    }
-    public_prefix = ("/static",)
-
-    if request.url.path in public_exact or request.url.path.startswith(public_prefix):
-        return await call_next(request)
-
-    key = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
-    if key != "demo-key-123":
-        return JSONResponse(status_code=403, content={"error": "Invalid API key"})
-
-    return await call_next(request)
-
-
-# -------------------------------------------------------
-# SYSTEM & DEV endpoints (slightly adjusted to use AGENT_PATH_MAP)
-# -------------------------------------------------------
-@app.get("/", include_in_schema=False)
-@app.get("/health", include_in_schema=False)
-@router_sys.get("/health")
-async def health():
-    return {"status": "ok"}
-
-
-@app.get("/version", include_in_schema=False)
-@router_sys.get("/version")
-async def version():
-    return {"treehopper": f"v{VERSION}"}
-
-
-@router_dev.get("/agents")
-async def list_agents():
-    # return routes from agents dict (as before)
-    return [
-        {"path": p, "method": a["method"], "goal": a["goal"], "tags": a["tags"]}
-        for p, a in agents.items()
-    ]
-
-
-@router_dev.get("/chains")
-async def list_chains():
-    logger.info("[MAIN RUN TIME] to list the chain")
-    results: list[dict] = []
-
-    default_chain_type = "Single-step, sequential"
-
-    if CHAINS_DIR.is_dir():
-        for folder in CHAINS_DIR.iterdir():
-            cfg_path = folder / "chain.yaml"
-            if not cfg_path.exists():
-                continue
-            try:
-                cfg = yaml.safe_load(cfg_path.read_text())
-            except Exception:
-                continue
-
-            # --- MULTI-STEP CHAIN LOGIC ---
-            if "steps" in cfg.keys():
-                steps = cfg.get("steps", [])
-
-                # 1. Build the CHAIN TYPE string (e.g., sequential-->parallel)
-                execution_modes = [step.get("execution_mode") for step in steps]
-
-                if len(steps) == 1:
-                    chain_type = f"Multi-step, {execution_modes[0]}"
-                elif len(steps) > 1:
-                    chain_type = f"Multi-step, {'-->'.join(execution_modes)}"
-                else:
-                    chain_type = default_chain_type
-
-                # 2. Build the structured AGENTS LIST (List of Step Objects)
-                # Each item is a dictionary representing one step, maintaining order and mode.
-                ch_agents_list = []
-                for step in steps:
-                    mode = step.get("execution_mode", "SEQUENTIAL").upper()
-
-                    # Get the list of agent names for this step
-                    step_agent_names = [
-                        agent.get("agent_name") for agent in step.get("agents", [])
-                    ]
-
-                    ch_agents_list.append({mode: step_agent_names})
-
-                results.append(
-                    {
-                        "chain_name": cfg.get("chain_name"),
-                        "chain_id": cfg.get("chain_id"),
-                        "chain_type": chain_type,
-                        "endpoint": cfg.get("endpoint"),
-                        # Use the new structured list
-                        "agents": ch_agents_list,
-                        "created_at": cfg.get("created_at"),
-                    }
-                )
-
-            # --- SINGLE-STEP/LEGACY CHAIN LOGIC ---
-            else:
-                chain_type = default_chain_type
-                single_agent_names = [
-                    a.get("agent_name") for a in cfg.get("agents", [])
-                ]
-
-                # Structure single-step agents as a list containing one step object
-                ch_agents_list = [{"SEQUENTIAL": single_agent_names}]
-
-                results.append(
-                    {
-                        "chain_name": cfg.get("chain_name"),
-                        "chain_id": cfg.get("chain_id"),
-                        "chain_type": chain_type,
-                        "endpoint": cfg.get("endpoint"),
-                        "agents": ch_agents_list,
-                        "created_at": cfg.get("created_at"),
-                    }
-                )
-    return results
-
-
-# ===============================================================
-# GLOBAL RUN STATUS ENDPOINT  (MAIN SERVER)
-# ===============================================================
-
-
-@router_chains.get("/status/{run_id}")
-async def global_run_status(run_id: str):
-    """
-    Global lookup: Searches all chain run folders in ~/.treehopper/registry/chains/*
-    and returns unified structured status info.
-    """
-    registry_chains = Path(REGISTRY_DIR) / "chains"
-
-    if not registry_chains.exists():
-        return {"ok": False, "error": "registry_missing", "run_id": run_id}
-
-    # search all chains
-    for chain_folder in registry_chains.glob("*"):
-        run_file = chain_folder / "runs" / f"{run_id}.json"
-        if run_file.exists():
-            try:
-                data = json.loads(run_file.read_text())
-                stat = run_file.stat()
-                return {
-                    "ok": True,
-                    "run_id": run_id,
-                    "chain_name": data.get("chain_name"),
-                    "chain_id": data.get("chain_id"),
-                    "status": data.get("status"),
-                    "current_step_index": data.get("current_step_index"),
-                    "cancelled": data.get("cancelled", False),
-                    "success": data.get("success", False),
-                    "last_updated": datetime.utcfromtimestamp(stat.st_mtime).isoformat()
-                    + "Z",
-                    "raw": data,
-                }
-            except Exception as e:
-                return {"ok": False, "error": f"parse_failure: {e}", "run_id": run_id}
-
-    return {"ok": False, "error": "run_not_found", "run_id": run_id}
-
-
-# -------------------------------------------------------
-# CORE: _run_agent_path (used by chain runtime)
-# -------------------------------------------------------
-# async def _run_agent_path(path: str, params: dict):
-#     print("[MAIN RUN TIME] Agent execution from main server")
-#     """
-#     Called by chain runtime app. Uses AGENT_PATH_MAP to find the runtime wrapper.
-#     Ensures cancellation BEFORE and AFTER calling the handler.
-#     """
-#     import asyncio
-#     from treehopper.runtime_context import get_run_id
-#     from treehopper.treehopper_cancellation import is_run_cancelled
-
-#     # Normalize path forms to full_path
-#     if not path.startswith("/api/v1/agents/"):
-#         path = f"/api/v1/agents{path if path.startswith('/') else '/' + path}"
-
-#     if path not in AGENT_PATH_MAP:
-#         raise RuntimeError(f"Agent path not found: {path}")
-
-#     wrapper = AGENT_PATH_MAP[path]["handler"]
-
-#     # 1) cancellation check BEFORE call
-#     run_id = get_run_id()
-#     if run_id:
-#         cancelled = await is_run_cancelled(run_id)
-#         if cancelled:
-#             print(f"[treehopper:_run_agent_path] CANCEL detected BEFORE calling {path}")
-#             raise asyncio.CancelledError()
-
-#     # 2) execute wrapper (which will instantiate Pydantic model and call original handler)
-#     try:
-#         result = await wrapper(params)
-#     except asyncio.CancelledError:
-#         print(f"[treehopper:_run_agent_path] CANCELLED WHILE executing {path}")
-#         raise
-#     except Exception as e:
-#         print(f"[treehopper:_run_agent_path] ERROR executing {path}: {e}")
-#         traceback.print_exc()
-#         raise
-
-#     # 3) cancellation check AFTER call (some handlers might take long to return)
-#     if run_id:
-#         cancelled = await is_run_cancelled(run_id)
-#         if cancelled:
-#             print(
-#                 f"[treehopper:_run_agent_path] CANCEL detected AFTER executing {path}"
-#             )
-#             raise asyncio.CancelledError()
-
-#     return result
-
-
-# -------------------------------------------------------
-# helper used by the /api/v1/dev/chain route — maps params -> call
+# AGENT EXECUTION
 # -------------------------------------------------------
 async def _execute_agent_step(path: str, params: dict) -> dict:
     """
@@ -555,6 +232,102 @@ async def _execute_agent_step(path: str, params: dict) -> dict:
     return res
 
 
+# -------------------------------------------------------
+# CHAIN RESOLUTION
+# -------------------------------------------------------
+def resolve_chain_by_name(chain_name: str) -> tuple[dict, Path]:
+    name = chain_name.lower().strip()
+
+    for c in load_chains_index():
+        if c.get("chain_name", "").lower() == name:
+            chain_dir = CHAINS_DIR / c["chain_id"]
+            cfg = yaml.safe_load((chain_dir / "chain.yaml").read_text())
+            return cfg, chain_dir
+
+    if CHAINS_DIR.exists():
+        for d in CHAINS_DIR.iterdir():
+            cfg_file = d / "chain.yaml"
+            if not cfg_file.exists():
+                continue
+            cfg = yaml.safe_load(cfg_file.read_text())
+            if cfg.get("chain_name", "").lower() == name:
+                return cfg, d
+
+    raise HTTPException(status_code=404, detail=f"Chain not found: {chain_name}")
+
+
+# -------------------------------------------------------
+# DEV ENDPOINTS (RESTORED)
+# -------------------------------------------------------
+@router_dev.get("/agents")
+async def list_agents():
+    return [
+        {"path": p, "method": a["method"], "goal": a["goal"], "tags": a["tags"]}
+        for p, a in agents.items()
+    ]
+
+
+@router_dev.get("/chains")
+async def list_chains():
+    results: list[dict] = []
+    default_chain_type = "Single-step, sequential"
+
+    if CHAINS_DIR.is_dir():
+        for folder in CHAINS_DIR.iterdir():
+            cfg_path = folder / "chain.yaml"
+            if not cfg_path.exists():
+                continue
+            try:
+                cfg = yaml.safe_load(cfg_path.read_text())
+            except Exception:
+                continue
+
+            # Ensure cfg is not None
+            if not cfg:
+                continue
+
+            if "steps" in cfg:
+                steps = cfg.get("steps", [])
+                execution_modes = [s.get("execution_mode") for s in steps]
+
+                chain_type = (
+                    f"Multi-step, {'-->'.join(execution_modes)}"
+                    if len(execution_modes) > 1
+                    else f"Multi-step, {execution_modes[0]}"
+                )
+
+                agents_list = []
+                for s in steps:
+                    agents_list.append(
+                        {
+                            s.get("execution_mode", "SEQUENTIAL").upper(): [
+                                a.get("agent_name") for a in s.get("agents", [])
+                            ]
+                        }
+                    )
+            else:
+                chain_type = default_chain_type
+                agents_list = [
+                    {"SEQUENTIAL": [a.get("agent_name") for a in cfg.get("agents", [])]}
+                ]
+
+            results.append(
+                {
+                    "chain_name": cfg.get("chain_name"),
+                    "chain_id": cfg.get("chain_id"),
+                    "chain_type": chain_type,
+                    "endpoint": cfg.get("endpoint"),
+                    "agents": agents_list,
+                    "created_at": cfg.get("created_at"),
+                }
+            )
+
+    return results
+
+
+# -------------------------------------------------------
+# CHAIN EXECUTION
+# -------------------------------------------------------
 @router_chains.post("/{chain_name}/run")
 async def run_chain_endpoint(chain_name: str, payload: dict | None = None):
     """
@@ -650,17 +423,50 @@ async def run_chain_endpoint(chain_name: str, payload: dict | None = None):
     return history
 
 
+@router_chains.get("/status/{run_id}")
+async def global_run_status(run_id: str):
+    """
+    Global lookup: Searches all chain run folders in ~/.treehopper/registry/chains/*
+    and returns unified structured status info.
+    """
+    registry_chains = Path(REGISTRY_DIR) / "chains"
+
+    if not registry_chains.exists():
+        return {"ok": False, "error": "registry_missing", "run_id": run_id}
+
+    # search all chains
+    for chain_folder in registry_chains.glob("*"):
+        run_file = chain_folder / "runs" / f"{run_id}.json"
+        if run_file.exists():
+            try:
+                data = json.loads(run_file.read_text())
+                stat = run_file.stat()
+                return {
+                    "ok": True,
+                    "run_id": run_id,
+                    "chain_name": data.get("chain_name"),
+                    "chain_id": data.get("chain_id"),
+                    "status": data.get("status"),
+                    "current_step_index": data.get("current_step_index"),
+                    "cancelled": data.get("cancelled", False),
+                    "success": data.get("success", False),
+                    "last_updated": datetime.utcfromtimestamp(stat.st_mtime).isoformat()
+                    + "Z",
+                    "raw": data,
+                }
+            except Exception as e:
+                return {"ok": False, "error": f"parse_failure: {e}", "run_id": run_id}
+
+    return {"ok": False, "error": "run_not_found", "run_id": run_id}
+
+
 @router_chains.get("/{chain_name}/runs")
 async def list_chain_runs(chain_name: str, limit: int = 50):
-    """
-    List recent runs for a chain (summary).
-    """
     cfg, chain_dir = resolve_chain_by_name(chain_name)
-    runs = rr_list_chain_runs(chain_dir, limit=limit)
     return {
-        "chain_name": cfg.get("chain_name", chain_name),
-        "chain_id": cfg.get("chain_id"),
-        "runs": runs,
+        "chain_name": cfg["chain_name"],
+        "chain_id": cfg["chain_id"],
+        "runs": rr_list_chain_runs(chain_dir, limit=limit),
     }
 
 
@@ -674,31 +480,48 @@ async def chain(body: dict):
 
 
 # -------------------------------------------------------
-# DEVSTORE / SEARCH (unchanged)
+# DEVSTORE / SEARCH (FIXED – router based)
 # -------------------------------------------------------
-@app.post("/api/v1/dev/store", tags=["Devtools"])
+@router_dev.post("/store", tags=["Devtools"])
 async def store(key: str, content: str):
-    collection.add(documents=[content], ids=[key], embeddings=[[0.1] * 384])
+    collection.add(
+        documents=[content],
+        ids=[key],
+        embeddings=[[0.1] * 384],
+    )
     return {"status": "stored"}
 
 
-@app.get("/api/v1/dev/search", tags=["Devtools"])
+@router_dev.get("/search", tags=["Devtools"])
 async def search(query: str):
     r = collection.query(query_texts=[query], n_results=3)
     return {"results": {"documents": r.get("documents", [[]])[0]}}
 
 
 # -------------------------------------------------------
-# AGENT DISCOVERY (unchanged behavior; decorator fills AGENT_PATH_MAP)
+# SYSTEM
+# -------------------------------------------------------
+@router_sys.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
+@router_sys.get("/version")
+async def version():
+    return {"treehopper": f"v{VERSION}"}
+
+
+# -------------------------------------------------------
+# DISCOVERY
 # -------------------------------------------------------
 def load_module_from_path(name: str, path: str):
     spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or not isinstance(spec.loader, Loader):
-        raise ImportError(f"Invalid spec for: {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    if not spec or not isinstance(spec.loader, Loader):
+        raise ImportError(path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def ensure_pkg(name: str, path: Path | None = None):
@@ -738,87 +561,118 @@ def get_chain_id(chain_name: str) -> str | None:
     return None
 
 
-def load_chains_index() -> list[dict]:
-    if not CHAINS_INDEX.exists():
-        return []
-    try:
-        return json.loads(CHAINS_INDEX.read_text())
-    except Exception:
-        return []
-
-
-def resolve_chain_by_name(chain_name: str) -> tuple[dict, Path]:
-    chain_name = chain_name.strip().lower()
-    index = load_chains_index()
-    chain_id = None
-    for c in index:
-        if c.get("chain_name", "").lower() == chain_name:
-            chain_id = c.get("chain_id")
-            break
-    if not chain_id:
-        if CHAINS_DIR.is_dir():
-            for folder in CHAINS_DIR.iterdir():
-                cfg_path = folder / "chain.yaml"
-                if not cfg_path.exists():
-                    continue
-                try:
-                    cfg = yaml.safe_load(cfg_path.read_text())
-                except Exception:
-                    continue
-                if cfg.get("chain_name", "").lower() == chain_name:
-                    return cfg, folder
-        raise HTTPException(status_code=404, detail=f"Chain not found: {chain_name}")
-    chain_dir = CHAINS_DIR / chain_id
-    cfg_path = chain_dir / "chain.yaml"
-    if not cfg_path.exists():
-        raise HTTPException(status_code=404, detail=f"Chain config missing: {chain_id}")
-    try:
-        cfg = yaml.safe_load(cfg_path.read_text())
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Invalid chain.yaml: {e}")
-    return cfg, chain_dir
-
-
-# -------------------------------------------------------
-# Discovery: load builtin + registry agents (calls decorator, which populates AGENT_PATH_MAP)
-# -------------------------------------------------------
 def discover_agents():
-    # Skip discovery in pytest in-memory mode except when CLI needs it
     if os.getenv("PYTEST_CURRENT_TEST"):
-        cli_commands = {"run", "call", "build", "lint", "init"}
-        if not any(cmd in sys.argv for cmd in cli_commands):
-            logger.info(
-                "🧪 Pytest in-memory mode: skipping folder agent auto-discovery"
-            )
+        if not any(cmd in sys.argv for cmd in {"run", "call", "build"}):
             return
 
-    core_dir = os.path.join(os.path.dirname(__file__), "agents")
-    if os.path.isdir(core_dir):
-        for f in os.listdir(core_dir):
-            if f.endswith(".py") and not f.startswith("_"):
-                load_module_from_path(
-                    f"treehopper_builtin_{f}", os.path.join(core_dir, f)
-                )
+    builtin = Path(__file__).parent / "agents"
+    if builtin.exists():
+        for f in builtin.glob("*.py"):
+            if not f.name.startswith("_"):
+                load_module_from_path(f"treehopper_builtin_{f.stem}", str(f))
 
-    if REGISTRY_AGENTS.is_dir():
+    if REGISTRY_AGENTS.exists():
         ensure_pkg("treehopper_user", REGISTRY_AGENTS)
-        for agent_dir in REGISTRY_AGENTS.iterdir():
-            if not agent_dir.is_dir():
+        for d in REGISTRY_AGENTS.iterdir():
+            ensure_pkg(f"treehopper_user.{d.name}", d)
+            for f in ("schema.py", "handler.py"):
+                p = d / f
+                if p.exists():
+                    load_module_from_path(f"treehopper_user.{d.name}.{p.stem}", str(p))
+
+
+# -------------------------------------------------------
+# APP FACTORY (🔥 FIXES CI + TEST ISSUES)
+# -------------------------------------------------------
+def get_app() -> FastAPI:
+    from treehopper.th_config import ensure_dirs
+
+    ensure_dirs()  # 🔥 forces paths to reflect current TH_ROOT
+
+    from treehopper.registry import reload_registry
+
+    reload_registry()
+
+    app = FastAPI(
+        title="Treehopper Agentic API",
+        docs_url=None,
+        redoc_url=None,
+        version=VERSION,
+    )
+
+    discover_agents()
+
+    app.include_router(router_agents)
+    app.include_router(router_dev)
+    app.include_router(router_sys)
+    app.include_router(router_chains)
+
+    STATIC_DIR = Path(__file__).parent / "static"
+    if STATIC_DIR.exists():
+        app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+    # -------------------------------------------------------
+    # CUSTOM DOCS & FAVICON
+    # -------------------------------------------------------
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon():
+        return FileResponse(os.path.join(STATIC_DIR, "treehopper_favicon.png"))
+
+    @app.get("/docs", include_in_schema=False)
+    async def custom_docs():
+        return get_swagger_ui_html(
+            openapi_url="/openapi.json",
+            title="Treehopper Agentic API",
+            swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
+            swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
+            swagger_favicon_url="/static/treehopper_favicon.png",
+        )
+
+    @app.middleware("http")
+    async def auth_middleware(request: Request, call_next):
+        # Whitelist public endpoints
+        public_paths = {
+            "/",
+            "/health",
+            "/version",
+            "/docs",
+            "/favicon.ico",  # ✅ Add favicon to whitelist
+            "/openapi.json",
+            "/api/v1/sys/health",
+            "/api/v1/sys/version",
+        }
+
+        if request.url.path.startswith("/static") or request.url.path in public_paths:
+            return await call_next(request)
+
+        if request.headers.get("x-api-key") != "demo-key-123":
+            return JSONResponse(status_code=403, content={"error": "Invalid API key"})
+
+        return await call_next(request)
+
+    @app.on_event("startup")
+    async def maybe_auto_resume():
+        cfg = read_config()
+        if not cfg.get("auto_resume"):
+            return
+        for folder in CHAINS_DIR.iterdir():
+            last = folder / "last_run.json"
+            if not last.exists():
                 continue
-            pkg = f"treehopper_user.{agent_dir.name}"
-            ensure_pkg(pkg, agent_dir)
-            schema = agent_dir / "schema.py"
-            handler = agent_dir / "handler.py"
-            if schema.exists():
-                load_module_from_path(f"{pkg}.schema", str(schema))
-            if handler.exists():
-                load_module_from_path(f"{pkg}.handler", str(handler))
+            try:
+                data = json.loads(last.read_text())
+            except Exception:
+                continue
+            if data.get("status") in ("running", "failed", "pending") and not data.get(
+                "cancelled"
+            ):
+                subprocess.Popen(["treehopper", "chain", "resume", data["run_id"]])
+
+    return app
 
 
-discover_agents()
-
-# Register routers (unchanged)
-app.include_router(router_agents)
-app.include_router(router_dev)
-app.include_router(router_sys)
-app.include_router(router_chains)
+# -------------------------------------------------------
+# ASGI ENTRYPOINT
+# -------------------------------------------------------
+app = get_app()

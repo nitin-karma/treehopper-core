@@ -37,7 +37,7 @@ CHAINS_INDEX = REGISTRY_DIR / "chains.json"
 # RUNTIME_DIR = TH_ROOT / "runtime"
 RUNTIME_DIR = Path(os.getenv("RUNTIME_DIR", str(TH_ROOT / "runtime")))
 CANCEL_DIR = RUNTIME_DIR / "cancels"
-CANCEL_DIR.mkdir(parents=True, exist_ok=True)
+# CANCEL_DIR.mkdir(parents=True, exist_ok=True)
 MAIN_PID_FILE = RUNTIME_DIR / "main_server.pid"
 
 # Chain runtime PID prefix
@@ -65,6 +65,8 @@ SUBSCRIPTION_FILE = TH_ROOT / "subscription_id.txt"
 #     except Exception:
 #         pass
 
+ARCHIVE_DIR = Path(TH_ROOT) / "archive"
+
 
 def ensure_dirs():
     for _d in (
@@ -74,6 +76,7 @@ def ensure_dirs():
         CHAINS_DIR,
         RUNTIME_DIR,
         CANCEL_DIR,
+        ARCHIVE_DIR,
     ):
         _d.mkdir(parents=True, exist_ok=True)
 
@@ -191,5 +194,3 @@ ARCHIVE_RETAIN_DAYS = 90
 
 FILE_ROTATE_MAX_MB = 512
 FILE_ROTATE_MAX_COUNT = 1000
-
-ARCHIVE_DIR = Path(TH_ROOT) / "archive"

@@ -26,9 +26,9 @@ def find_script() -> Path | None:
         return cwd
 
     # 3) optional user tools folder
-    fallback = Path.home() / ".treehopper" / "tools" / SCRIPT_NAME
-    if fallback.exists():
-        return fallback
+    # fallback = Path.home() / ".treehopper" / "tools" / SCRIPT_NAME
+    # if fallback.exists():
+    #     return fallback
 
     return None
 

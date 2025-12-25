@@ -10,8 +10,8 @@ from treehopper.th_config import (
     # TH_ROOT,
     REGISTRY_DIR,
     REGISTRY_AGENTS,
-    REGISTRY_AGENTS_INDEX,
-    SUBSCRIPTION_FILE,
+    # REGISTRY_AGENTS_INDEX,
+    # SUBSCRIPTION_FILE,
     RUNTIME_DIR,
     MAIN_PID_FILE,
     CHAIN_PID_PREFIX,
@@ -23,11 +23,19 @@ from treehopper.chains_agents_refresh_status import (
     agents_status,
     # agents_restart,
 )
+
 from treehopper.whatis import print_whatis
 from treehopper.th_ui_cli import launch_ui, stop_ui
 from treehopper.visualizer.db_util import db
 from treehopper.admin_cli import admin_entry
 from treehopper.maintainance.maintainer import startup_maintenance
+from treehopper.utils.commons import (
+    get_or_create_subscription_id,
+    load_agents_index,
+    save_agents_index,
+    ensure_registry_dirs,
+)
+from treehopper.treehopper_cleaner import main as clean_main
 
 # ==============================================================================
 # GLOBAL OVERRIDE FOR DEVELOPMENT
@@ -180,34 +188,6 @@ def kill_pid(pid: int):
 # ---------------------------------------------------------------------
 # REGISTRY / SUBSCRIPTION HELPERS
 # ---------------------------------------------------------------------
-def ensure_registry_dirs() -> None:
-    REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
-    REGISTRY_AGENTS.mkdir(parents=True, exist_ok=True)
-
-
-def get_or_create_subscription_id() -> str:
-    ensure_registry_dirs()
-    if SUBSCRIPTION_FILE.exists():
-        return SUBSCRIPTION_FILE.read_text().strip()
-    sid = str(uuid.uuid4())
-    SUBSCRIPTION_FILE.write_text(sid)
-    return sid
-
-
-def load_agents_index() -> list[dict]:
-    ensure_registry_dirs()
-    if not REGISTRY_AGENTS_INDEX.exists():
-        return []
-    try:
-        return json.loads(REGISTRY_AGENTS_INDEX.read_text())
-    except json.JSONDecodeError as e:
-        logger.error(f"{str(e)}")
-        return []
-
-
-def save_agents_index(index: list[dict]) -> None:
-    ensure_registry_dirs()
-    REGISTRY_AGENTS_INDEX.write_text(json.dumps(index, indent=2))
 
 
 def validate_agent_name(name: str) -> str:
@@ -1221,12 +1201,13 @@ def main() -> None:
     logger.info("[treehopper_cli] Initialising the DB if not exists")
     db.init_db()
 
-    logger.info("[treehopper_cli] Ensuring all directories exists")
-    ensure_dirs()
-
-    logger.info("[treehopper_cli] Ensuring maintaince checks and actions")
     # ✅ SAFE, FAST, ONE-TIME
-    startup_maintenance()
+    if not os.getenv("TH_TEST_MODE"):
+        logger.info("[treehopper_cli] Ensuring all directories exists")
+        ensure_dirs()
+        print("[treehopper_cli] Ensuring maintaince checks and actions")
+        logger.info("[treehopper_cli] Ensuring maintaince checks and actions")
+        startup_maintenance()
 
     if len(sys.argv) == 1:
         print_whatis()
@@ -1442,8 +1423,6 @@ def main() -> None:
         push_file(sys.argv[2], sys.argv[3])
     elif cmd == "clean":
         logger.info("agent clean command")
-        from .treehopper_cleaner import main as clean_main
-
         clean_main()
     elif cmd == "launch":
         if len(sys.argv) < 3:

@@ -12,10 +12,8 @@ jobs:
       TREEHOPPER_RUNTIME_MODE: "1"
       TREEHOPPER_FORCE_LOCAL: "1"
       TREEHOPPER_API_KEY: "demo-key-123"
-
       TH_TEST_MODE: "1"
       TH_LLM_PROVIDER: "mock"
-
       OPENAI_API_KEY: ""
       PERPLEXITY_API_KEY: ""
       GEMINI_API_KEY: ""
@@ -29,38 +27,53 @@ jobs:
         with:
           python-version: "3.10"
 
-      # 🔥 CRITICAL STEP — install Treehopper properly
-      - name: Install Treehopper (editable)
+      # ✅ Install Treehopper (editable)
+      - name: Install Treehopper
         run: |
           pip install --upgrade pip
           pip install -e .
 
-      # Optional: test-only deps (pytest not runtime)
+      # ✅ Install test dependencies from pyproject.toml
       - name: Install test dependencies
         run: |
-          pip install pytest pytest-asyncio requests websocket-client
+          pip install -e ".[test]"
+
+      # ✅ ADDED: Run linters before tests
+      - name: Run Black (formatting check)
+        run: |
+          pip install black
+          black --check treehopper/
+
+      - name: Run Flake8 (linting)
+        run: |
+          pip install flake8
+          flake8 treehopper/ --max-line-length=120
+
+      - name: Run Mypy (type checking)
+        run: |
+          pip install mypy types-PyYAML types-requests types-setuptools types-tabulate
+          mypy treehopper/ --python-version=3.10 --ignore-missing-imports --install-types --non-interactive
+        continue-on-error: true  # Don't fail CI on mypy issues (optional)
 
       # ----------------------------------
-      # 1️⃣ UNIT TESTS
+      # Unit Tests
       # ----------------------------------
       - name: Run unit tests
         run: |
-          pytest tests/unit
+          pytest tests/unit -v
 
       # ----------------------------------
-      # 2️⃣ INTEGRATION TESTS
+      # Integration Tests
       # ----------------------------------
       - name: Run integration tests
         run: |
-          pytest -s tests/integration
+          pytest tests/integration -v
 
       # ----------------------------------
-      # 3️⃣ REAL E2E (shell, not pytest)
+      # E2E Smoke Test
       # ----------------------------------
-      - name: Run REAL E2E smoke test
+      - name: Run E2E smoke test
         run: |
           chmod +x scripts/e2e_smoke_treehopper_full.sh
-          ./scripts/e2e_smoke_treehopper_full.sh || true
-# NOTE:
-# Cleanup sends SIGTERM to background servers.
-# We swallow it to keep CI green.
+          ./scripts/e2e_smoke_treehopper_full.sh
+        continue-on-error: true  # Don't fail CI if E2E has issues

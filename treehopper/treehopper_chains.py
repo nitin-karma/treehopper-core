@@ -26,7 +26,7 @@ from treehopper.utils.shared_files import (
     has_only_one_shared_file,
     get_the_only_shared_file,
 )
-from treehopper.treehopper_cli import get_or_create_subscription_id
+from treehopper.utils.commons import get_or_create_subscription_id
 from treehopper.treehopper_parallel import parallel_chain_run_entry
 from treehopper.utils import run_registry as run_registry_mod
 from treehopper.utils.config import read_pid_and_port
@@ -37,11 +37,11 @@ from treehopper.th_config import (
     BASE_URL,
     # HOME,
     TH_ROOT,
-    REGISTRY_DIR,
+    # REGISTRY_DIR,
     # REGISTRY_AGENTS,
-    REGISTRY_AGENTS_INDEX,
+    # REGISTRY_AGENTS_INDEX,
     CHAINS_DIR,
-    CHAINS_INDEX,
+    # CHAINS_INDEX,
     RUNTIME_DIR,
     CHAIN_PID_PREFIX,
     CANCEL_DIR,
@@ -55,6 +55,12 @@ from treehopper.th_config import (
 from treehopper.visualizer.db_util import db
 from treehopper.logging import get_logger
 from treehopper.maintainance.maintainer import startup_maintenance
+from treehopper.utils.commons import (
+    load_chains_index,
+    save_chains_index,
+    load_agents_index,
+    ensure_registry_dirs,
+)
 
 logger = get_logger()
 logger.info("Inside Treehopper chains")
@@ -70,37 +76,6 @@ class ChainRef:
     chain_id: str
     cfg_path: Path
     dir_path: Path
-
-
-def ensure_registry_dirs() -> None:
-    REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
-    CHAINS_DIR.mkdir(parents=True, exist_ok=True)
-    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def load_chains_index() -> List[Dict[str, Any]]:
-    ensure_registry_dirs()
-    if not CHAINS_INDEX.exists():
-        return []
-    try:
-        return json.loads(CHAINS_INDEX.read_text())
-    except json.JSONDecodeError:
-        return []
-
-
-def save_chains_index(index: List[Dict[str, Any]]) -> None:
-    ensure_registry_dirs()
-    CHAINS_INDEX.write_text(json.dumps(index, indent=2))
-
-
-def load_agents_index() -> List[Dict[str, Any]]:
-    ensure_registry_dirs()
-    if not REGISTRY_AGENTS_INDEX.exists():
-        return []
-    try:
-        return json.loads(REGISTRY_AGENTS_INDEX.read_text())
-    except json.JSONDecodeError:
-        return []
 
 
 def is_port_in_use(port: int) -> bool:
@@ -1818,11 +1793,13 @@ def validate_routing_rules(cfg):
 def chain_entry(argv: List[str]) -> None:
     logger.info("[treehopper_chains] Initialising the DB if not exists")
     db.init_db()
-    logger.info("[treehopper_chains] Ensuring all directories exists")
-    ensure_dirs()
-    logger.info("[treehopper_chains] Ensuring maintaince checks and actions")
-    # ✅ SAFE, FAST, ONE-TIME
-    startup_maintenance()
+
+    if not os.getenv("TH_TEST_MODE"):
+        logger.info("[treehopper_chains] Ensuring all directories exists")
+        ensure_dirs()
+        print("[treehopper_cli] Ensuring maintaince checks and actions")
+        logger.info("[treehopper_cli] Ensuring maintaince checks and actions")
+        startup_maintenance()
 
     if not argv:
         print_chain_help()

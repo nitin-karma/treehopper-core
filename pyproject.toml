@@ -11,7 +11,7 @@ authors = [
     { name = "Nitin Kumar Karma", email = "developer@example.com" }
 ]
 license = { file = "LICENSE" }
-requires-python = ">=3.9"
+requires-python = ">=3.10"  # ✅ Requires Python 3.10+
 
 dependencies = [
     "fastapi>=0.110,<0.115",
@@ -30,9 +30,6 @@ dependencies = [
     "PyMuPDF"
 ]
 
-# -------------------------------------------------------
-# ✅ NEW — Python test/development dependencies
-# -------------------------------------------------------
 [project.optional-dependencies]
 test = [
     "pytest>=7.0",
@@ -63,9 +60,6 @@ treehopper = [
     "templates/*",
 ]
 
-# -------------------------------------------------------
-# ✅ UPDATED Pytest configuration (compatible with new tests)
-# -------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
@@ -81,5 +75,28 @@ markers = [
     "e2e: end-to-end tests"
 ]
 
-[mypy]
+# -------------------------------------------------------
+# ✅ Mypy configuration - FIXED to match requires-python
+# -------------------------------------------------------
+[tool.mypy]
+python_version = "3.10"  # ✅ CHANGED from "3.9" to "3.10" to match requires-python
 ignore_missing_imports = true
+warn_return_any = false
+warn_unused_configs = true
+disallow_untyped_defs = false
+
+# Exclude pattern using regex - note the double backslash
+exclude = '''(?x)(
+    ^tests/unit/conftest\.py$
+    | ^tests/integration/conftest\.py$
+    | ^tests/.*/conftest\.py$
+)'''
+
+# Per-module overrides as backup
+[[tool.mypy.overrides]]
+module = "conftest"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true

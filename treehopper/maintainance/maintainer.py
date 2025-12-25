@@ -154,7 +154,7 @@ class RuntimeFileRotator:
         # --- 4️⃣ Archive eligible files
         today = datetime.utcnow().strftime("%Y-%m-%d")
         archive_dir = get_archive_dir()
-        archive_dir.mkdir(parents=True, exist_ok=True)
+        # archive_dir.mkdir(parents=True, exist_ok=True)
         archive = archive_dir / f"runtime-{today}.zip"
 
         with zipfile.ZipFile(archive, "a", zipfile.ZIP_DEFLATED) as z:
@@ -213,7 +213,7 @@ class DBRetentionManager:
 
         today = datetime.utcnow().strftime("%Y-%m-%d")
         archive_dir = get_archive_dir()
-        archive_dir.mkdir(parents=True, exist_ok=True)
+        # archive_dir.mkdir(parents=True, exist_ok=True)
         dest = archive_dir / f"dashboard-{today}.db"
 
         if dest.exists():
@@ -303,7 +303,12 @@ def storage_metrics() -> Dict:
 def startup_maintenance():
     # 🚫 NEVER run maintenance during tests or bootstrap
     if os.getenv("TH_TEST_MODE") == "1":
-        logger.info("[maintainer] Skipping startup maintenance (TH_TEST_MODE)")
+        print(
+            f"[startup_maintenance] Skipping startup maintenance {os.getenv('TH_TEST_MODE')}"
+        )
+        logger.info(
+            f"[startup_maintenance] Skipping startup maintenance {os.getenv('TH_TEST_MODE')}"
+        )
         return
     logger.info("[maintainer] Startup maintenance begin")
 

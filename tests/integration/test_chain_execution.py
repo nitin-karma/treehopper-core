@@ -1,15 +1,31 @@
 # tests/integration/test_chain_execution.py
 
 import pytest
+import os
 
 
-def test_simple_chain_run(client, auth_headers):
+def test_simple_chain_run(client, auth_headers, isolated_treehopper_root):
+    # 🔍 DEBUG: Check where things are
+    print(f"\n🔍 Test TH_ROOT: {os.environ.get('TH_ROOT')}")
+    print(f"🔍 Bootstrap root: {isolated_treehopper_root}")
+
+    from treehopper.th_config import CHAINS_DIR, REGISTRY_DIR
+
+    print(f"🔍 App REGISTRY_DIR: {REGISTRY_DIR}")
+    print(f"🔍 App CHAINS_DIR: {CHAINS_DIR}")
+    print(
+        f"🔍 Expected chains path: {isolated_treehopper_root / 'registry' / 'chains'}"
+    )
+    print(
+        f"🔍 Chains in CHAINS_DIR: {list(CHAINS_DIR.glob('*')) if CHAINS_DIR.exists() else 'MISSING'}"
+    )
+
     payload = {"file_path": "shared/pdf_extractor-a1b2c3d4/files/contract.pdf"}
     rate_limit_indicator = "429 Too Many Requests"
 
     endpoint = "/api/v1/chains/doc_flow/"
 
-    print(client.get(endpoint + "health", headers=auth_headers).text)
+    # print(client.get(endpoint + "health", headers=auth_headers).text)
 
     # --- Try to execute the POST request ---
     try:

@@ -1,6 +1,6 @@
 # treehopper/registry.py
-from treehopper.treehopper_cli import load_agents_index
-from treehopper.treehopper_chains import load_chains_index
+from treehopper.utils.commons import load_agents_index
+from treehopper.utils.commons import load_chains_index
 
 AGENT_REGISTRY = None
 CHAIN_REGISTRY = None
