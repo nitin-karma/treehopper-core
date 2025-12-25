@@ -36,6 +36,7 @@ from treehopper.utils.commons import (
     ensure_registry_dirs,
 )
 from treehopper.treehopper_cleaner import main as clean_main
+from treehopper.th_setup import setup_treehopper
 
 # ==============================================================================
 # GLOBAL OVERRIDE FOR DEVELOPMENT
@@ -1442,6 +1443,12 @@ def main() -> None:
             print("Usage: treehopper admin <action>")
             sys.exit(1)
         admin_entry(sys.argv[2:])
+
+    elif cmd == "setup":
+        logger.info("setup command")
+        success = setup_treehopper()
+        sys.exit(0 if success else 1)
+
     else:
         logger.info(f"Unknown command: {cmd}")
         print(f"Unknown command: {cmd}")

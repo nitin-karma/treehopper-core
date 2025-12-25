@@ -114,7 +114,7 @@ class WSManager:
                 record_analytics_event(run_id, chain_name, event)
             except Exception as e:
                 # Never break runtime because of analytics
-                logger.error("[analytics] failed:", e)
+                logger.error(f"[analytics] failed: {str(e)}")
                 pass
 
         # -------------------------------

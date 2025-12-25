@@ -12,20 +12,8 @@ HOME = Path.home()
 
 TH_ROOT = Path(os.getenv("TH_ROOT", str(HOME / ".treehopper")))
 
-# TH_ROOT = Path(
-#     os.getenv(
-#         "TREEHOPPER_HOME",        # ✅ canonical
-#         os.getenv(
-#             "TREEHOPPER_TH_ROOT", # backward compatible
-#             os.getenv(
-#                 "TH_ROOT",        # legacy
-#                 str(HOME / ".treehopper")
-#             )
-#         )
-#     )
-# ).resolve()
-
 # TH_ROOT = Path.home() / ".treehopper"
+
 # Registry layout
 REGISTRY_DIR = TH_ROOT / "registry"
 REGISTRY_AGENTS = REGISTRY_DIR / "agents"
@@ -37,9 +25,11 @@ CHAINS_INDEX = REGISTRY_DIR / "chains.json"
 # RUNTIME_DIR = TH_ROOT / "runtime"
 RUNTIME_DIR = Path(os.getenv("RUNTIME_DIR", str(TH_ROOT / "runtime")))
 CANCEL_DIR = RUNTIME_DIR / "cancels"
-# CANCEL_DIR.mkdir(parents=True, exist_ok=True)
-MAIN_PID_FILE = RUNTIME_DIR / "main_server.pid"
 
+# CANCEL_DIR.mkdir(parents=True, exist_ok=True)
+
+MAIN_PID_FILE = RUNTIME_DIR / "main_server.pid"
+UI_PID = RUNTIME_DIR / "ui.pid"
 # Chain runtime PID prefix
 CHAIN_PID_PREFIX = "det_chain_"
 
@@ -58,14 +48,11 @@ CANCEL_TIMEOUT = 30  # safe but configurable
 # Subscription path
 SUBSCRIPTION_FILE = TH_ROOT / "subscription_id.txt"
 
-# Ensure directories exist on import
-# for _d in (TH_ROOT, REGISTRY_DIR, REGISTRY_AGENTS, CHAINS_DIR, RUNTIME_DIR, CANCEL_DIR):
-#     try:
-#         _d.mkdir(parents=True, exist_ok=True)
-#     except Exception:
-#         pass
-
 ARCHIVE_DIR = Path(TH_ROOT) / "archive"
+DB_DIR = TH_ROOT / "dashboard_db"
+
+# logs
+UI_LOG = RUNTIME_DIR / "ui.log"
 
 
 def ensure_dirs():
@@ -77,6 +64,7 @@ def ensure_dirs():
         RUNTIME_DIR,
         CANCEL_DIR,
         ARCHIVE_DIR,
+        DB_DIR,
     ):
         _d.mkdir(parents=True, exist_ok=True)
 
@@ -174,7 +162,6 @@ ASCII_BANNER = r"""
 DEFAULT_UI_PORT = 8090
 LOG_RENDER_LIMIT = 500
 DASHBOARD_DB_NAME = "dashboard_config.db"
-DB_DIR = "dashboard_db"
 ROLES = ["admin", "developer"]
 PERM = ["manage_users", "view_dashboard", "execute_chains"]
 DASHBOARD_HEADER = "TreehopperDash"

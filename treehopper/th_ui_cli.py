@@ -1,3 +1,7 @@
+# treehopper/th_ui_cli.py
+# UPDATED VERSION - Uses UI_PID, UI_LOG from th_config properly
+# Also ensures CANCEL_DIR exists (for run_registry.py compatibility)
+
 import os
 import time
 import sys
@@ -5,7 +9,7 @@ import subprocess
 import signal
 import socket
 from pathlib import Path
-from treehopper.th_config import DEFAULT_UI_PORT, RUNTIME_DIR
+from treehopper.th_config import DEFAULT_UI_PORT, UI_PID, UI_LOG, CANCEL_DIR
 from treehopper.logging import get_logger
 
 logger = get_logger()
@@ -49,15 +53,35 @@ def read_ui_pid(path: Path) -> int | None:
         return None
 
 
-def _get_runtime_dir() -> Path:
-    runtime = RUNTIME_DIR
-    return runtime
+def _ensure_ui_files():
+    """
+    Ensure UI-specific files and directories exist.
+    Called before launching UI to prevent errors.
+
+    This is critical because:
+    1. UI_LOG must exist before opening for append
+    2. UI_PID parent directory must exist before writing PID
+    3. CANCEL_DIR must exist (run_registry.py checks this)
+    """
+    # Ensure parent directory exists
+    UI_PID.parent.mkdir(parents=True, exist_ok=True)
+
+    # Create log file if it doesn't exist
+    if not UI_LOG.exists():
+        UI_LOG.touch()
+        logger.info(f"Created UI log file: {UI_LOG}")
+
+    # Ensure CANCEL_DIR exists (critical for run_registry.py)
+    CANCEL_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def launch_ui():
     """
     Launch TreehopperAI local visualizer UI
     """
+    # ✅ CRITICAL: Ensure all required files/dirs exist FIRST
+    _ensure_ui_files()
+
     args = sys.argv[2:]
 
     port = DEFAULT_UI_PORT
@@ -78,9 +102,9 @@ def launch_ui():
         print(f"❌ Port {port} is already in use. Please run 'th stop ui' first.")
         return
 
-    runtime = _get_runtime_dir()
-    pid_file = runtime / "ui.pid"
-    log_file = runtime / "ui.log"  # 1. Define log file path
+    # ✅ Use imported constants from th_config (NOT manual paths)
+    pid_file = UI_PID
+    log_file = UI_LOG
 
     cmd = [
         sys.executable,
@@ -90,43 +114,44 @@ def launch_ui():
         "--port",
         str(port),
         "--log-level",
-        "info",  # Changed to 'info' so you actually see startup in logs
+        "info",
     ]
 
     print("🌿 TreehopperAI UI Launcher")
     print("────────────────────────")
-    print(f"📁 TH_ROOT: {runtime.parent}")
+    print(f"📁 Runtime dir: {UI_PID.parent}")
 
     if fg:
         print(f"▶️ Running UI in foreground on http://localhost:{port}")
         subprocess.run(cmd)
         return
 
-    # 2. Open log file in append mode ('a')
-    # This ensures logs aren't wiped every time you restart
+    # ✅ Open log file in append mode
     log_f = open(log_file, "a", encoding="utf-8")
 
     proc = subprocess.Popen(
         cmd,
-        stdout=log_f,  # Redirect standard output to file
-        stderr=subprocess.STDOUT,  # Redirect errors to the same file
+        stdout=log_f,
+        stderr=subprocess.STDOUT,
         env=os.environ.copy(),
-        start_new_session=True,  # <--- ADD THIS
+        start_new_session=True,
     )
 
     pid_file.write_text(str(proc.pid))
 
     print(f"🚀 UI started on http://localhost:{port}")
     print(f"📌 PID: {proc.pid}")
-    print(f"📝 Log: {log_file}")  # 3. Inform the user where logs are going
+    print(f"📝 Log: {log_file}")
     print(f"🧭 Open in browser: http://localhost:{port}")
 
 
 def stop_ui():
-    runtime = _get_runtime_dir()
-    pid_file = runtime / "ui.pid"
+    """
+    Stop the TreehopperAI UI server
+    """
+    # ✅ Use imported constant from th_config
+    pid_file = UI_PID
 
-    # Using your read_pid helper style
     pid = read_ui_pid(pid_file)
 
     if not pid:
@@ -136,8 +161,6 @@ def stop_ui():
     print(f"🛑 Stopping Treehopper UI (PID {pid})")
 
     try:
-        # Instead of just kill_pid(pid), we kill the Group
-        # This is the "Magic Sauce" for Uvicorn on macOS
         kill_ui_pid(pid)
         pid_file.unlink(missing_ok=True)
         print("✔ Stopped")
@@ -145,7 +168,6 @@ def stop_ui():
         print("⚠️ UI process already stopped")
         pid_file.unlink(missing_ok=True)
     except Exception as e:
-        # Fallback to your standard agent kill if group kill fails
         logger.error(str(e))
         kill_ui_pid(pid)
         pid_file.unlink(missing_ok=True)
