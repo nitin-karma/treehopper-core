@@ -489,7 +489,7 @@ async def run_chain(
     token = set_run_id(run_id)
 
     async def _execute_chain():
-        nonlocal root_payload
+        # nonlocal root_payload
 
         steps = CHAIN_CFG.get("steps", [])
         runtime_state: Dict[str, Dict[str, Any]] = {}
