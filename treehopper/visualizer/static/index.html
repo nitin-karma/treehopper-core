@@ -8,6 +8,8 @@
   <title>TreehopperAI Dashboard</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="loader.css">
+  <!-- Storage Inspector -->
+  <link rel="stylesheet" href="storage-inspector.css">
 
   <!-- D3.js and Graphviz libraries -->
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
@@ -30,42 +32,61 @@
 <body>
   <div class="container">
     <!-- Header -->
-    <div class="header">
-        <img src="treehopper_logo.png" alt="TreehopperAI Logo" class="logo">
-        <h1>TreehopperAI</h1>
+    <!-- ========================================
+     UPDATED HEADER SECTION - index.html
+     Replace lines 33-68 in your index.html with this
+     ======================================== -->
 
-        <div class="header-controls">
-            <div id="liveStatus" class="status-monitor" title="System Status">
-                <svg class="heartbeat-icon" viewBox="0 0 50 50" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M5 25 L15 25 L20 10 L30 40 L35 25 L45 25" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                <span id="statusText">Connecting...</span>
+<!-- Header -->
+<div class="header">
+  <img src="treehopper_logo.png" alt="TreehopperAI Logo" class="logo">
+  <h1>TreehopperAI</h1>
+
+  <div class="header-controls">
+      <!-- Live Status Monitor (ECG) -->
+      <div id="liveStatus" class="status-monitor" title="System Status">
+          <svg class="heartbeat-icon" viewBox="0 0 50 50" xmlns="http://www.w3.org/2000/svg">
+            <path d="M5 25 L15 25 L20 10 L30 40 L35 25 L45 25" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span id="statusText">Connecting...</span>
+      </div>
+
+      <!-- Storage Inspector Button (NEW) -->
+      <button class="storage-inspector-btn" onclick="openStorageInspector()" title="Storage Inspector">
+          <svg class="storage-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="7" height="7"/>
+              <rect x="14" y="3" width="7" height="7"/>
+              <rect x="14" y="14" width="7" height="7"/>
+              <rect x="3" y="14" width="7" height="7"/>
+          </svg>
+          <span class="storage-label">Storage</span>
+      </button>
+
+      <!-- Menu (Hamburger) -->
+      <div class="menu-container">
+          <button class="hamburger-btn" onclick="toggleMenu()" title="Menu">
+            <span class="hamburger-line"></span>
+            <span class="hamburger-line"></span>
+            <span class="hamburger-line"></span>
+          </button>
+
+          <div class="dropdown-menu" id="dropdownMenu">
+            <div class="dropdown-item" onclick="toggleTheme()">
+              <span class="dropdown-item-icon" id="themeIcon">☀️</span>
+              <span class="dropdown-item-text">Toggle Theme</span>
             </div>
-
-          <div class="menu-container">
-            <button class="hamburger-btn" onclick="toggleMenu()" title="Menu">
-              <span class="hamburger-line"></span>
-              <span class="hamburger-line"></span>
-              <span class="hamburger-line"></span>
-            </button>
-
-            <div class="dropdown-menu" id="dropdownMenu">
-              <div class="dropdown-item" onclick="toggleTheme()">
-                <span class="dropdown-item-icon" id="themeIcon">☀️</span>
-                <span class="dropdown-item-text">Toggle Theme</span>
-              </div>
-              <div class="dropdown-item" onclick="showSubscription()">
-                <span class="dropdown-item-icon">🧾</span>
-                <span class="dropdown-item-text">Subscription ID</span>
-              </div>
-              <div class="dropdown-item" onclick="logout()">
-                <span class="dropdown-item-icon">🚪</span>
-                <span class="dropdown-item-text">Logout</span>
-              </div>
+            <div class="dropdown-item" onclick="showSubscription()">
+              <span class="dropdown-item-icon">🧾</span>
+              <span class="dropdown-item-text">Subscription ID</span>
+            </div>
+            <div class="dropdown-item" onclick="logout()">
+              <span class="dropdown-item-icon">🚪</span>
+              <span class="dropdown-item-text">Logout</span>
             </div>
           </div>
-        </div>
-    </div>
+      </div>
+  </div>
+</div>
 
     <!-- Tab Navigation -->
     <div class="tab-navigation">
@@ -433,5 +454,56 @@
       <div class="progress-bar"></div>
   </div>
 
+  <!-- Storage Inspector Modal -->
+  <div id="storageInspectorModal" class="storage-inspector-modal">
+      <div class="storage-inspector-content">
+          <!-- Header -->
+          <div class="inspector-header">
+              <div class="inspector-header-left">
+                  <div class="inspector-header-icon">
+                      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <rect x="3" y="3" width="7" height="7"/>
+                          <rect x="14" y="3" width="7" height="7"/>
+                          <rect x="14" y="14" width="7" height="7"/>
+                          <rect x="3" y="14" width="7" height="7"/>
+                      </svg>
+                  </div>
+                  <div>
+                      <h2 class="inspector-title">Storage Inspector</h2>
+                      <p class="inspector-subtitle">Monitor storage usage and system health</p>
+                  </div>
+              </div>
+              <button class="inspector-close" onclick="closeStorageInspector()" title="Close (Esc)">
+                  ×
+              </button>
+          </div>
+
+          <!-- Body (Dynamic Content) -->
+          <div class="inspector-body" id="inspectorBody">
+              <div class="inspector-loading">
+                  <div class="inspector-spinner"></div>
+                  <div class="inspector-loading-text">Loading storage metrics...</div>
+              </div>
+          </div>
+
+          <!-- Footer -->
+          <!-- Footer (Only Refresh Button) -->
+        <div class="inspector-footer">
+          <div class="inspector-footer-info" id="inspectorFooterInfo">
+              Last updated: --
+          </div>
+          <div class="inspector-actions">
+              <button class="inspector-btn inspector-btn-refresh" onclick="refreshStorageData()" title="Refresh (Ctrl+R)">
+                  <span>🔄</span>
+                  Refresh
+              </button>
+              <!-- Run Maintenance button REMOVED - use CLI commands shown in modal instead -->
+          </div>
+        </div>
+      </div>
+  </div>
+
+  <!-- Storage Inspector Script -->
+  <script src="storage-inspector.js"></script>
 </body>
 </html>

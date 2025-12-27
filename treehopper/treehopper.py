@@ -19,6 +19,7 @@ from fastapi.security import APIKeyHeader
 
 from dotenv import load_dotenv
 import chromadb
+
 import yaml
 from pydantic import BaseModel
 
@@ -61,6 +62,7 @@ AGENT_PATH_MAP: dict[str, dict] = {}
 # CHROMA MEMORY (unchanged behaviour)
 # -------------------------------------------------------
 if not CHROMA_DISABLED:
+    TH_TEST_MODE = os.getenv("TH_TEST_MODE") == "1"
     if TH_TEST_MODE:
         memory = chromadb.EphemeralClient()
     else:

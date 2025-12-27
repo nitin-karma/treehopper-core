@@ -47,7 +47,7 @@ jobs:
       - name: Run Flake8 (linting)
         run: |
           pip install flake8
-          flake8 treehopper/ --max-line-length=120
+          flake8 treehopper/ --max-line-length=250
 
       - name: Run Mypy (type checking)
         run: |

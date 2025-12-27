@@ -1,0 +1,72 @@
+<!-- ========================================
+     STORAGE INSPECTOR MODAL
+     Add this to index.html (before closing </body> tag)
+     ======================================== -->
+
+<!-- Storage Inspector Modal -->
+<div id="storageInspectorModal" class="storage-inspector-modal">
+    <div class="storage-inspector-content">
+        <!-- Header -->
+        <div class="inspector-header">
+            <div class="inspector-header-left">
+                <div class="inspector-header-icon">
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="3" width="7" height="7"/>
+                        <rect x="14" y="3" width="7" height="7"/>
+                        <rect x="14" y="14" width="7" height="7"/>
+                        <rect x="3" y="14" width="7" height="7"/>
+                    </svg>
+                </div>
+                <div>
+                    <h2 class="inspector-title">Storage Inspector</h2>
+                    <p class="inspector-subtitle">Monitor storage usage and system health</p>
+                </div>
+            </div>
+            <button class="inspector-close" onclick="closeStorageInspector()" title="Close (Esc)">
+                ×
+            </button>
+        </div>
+
+        <!-- Body (Dynamic Content) -->
+        <div class="inspector-body" id="inspectorBody">
+            <div class="inspector-loading">
+                <div class="inspector-spinner"></div>
+                <div class="inspector-loading-text">Loading storage metrics...</div>
+            </div>
+        </div>
+
+        <!-- Footer (Only Refresh Button) -->
+        <div class="inspector-footer">
+            <div class="inspector-footer-info" id="inspectorFooterInfo">
+                Last updated: --
+            </div>
+            <div class="inspector-actions">
+                <button class="inspector-btn inspector-btn-refresh" onclick="refreshStorageData()" title="Refresh (Ctrl+R)">
+                    <span>🔄</span>
+                    Refresh
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- ========================================
+     STORAGE INSPECTOR TRIGGER BUTTON
+     Add this to your navigation bar or header
+     ======================================== -->
+
+<!-- Example: Add to nav-actions or header -->
+<button class="inspector-trigger" onclick="openStorageInspector()" title="Storage Inspector">
+    <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxyZWN0IHg9IjMiIHk9IjMiIHdpZHRoPSI3IiBoZWlnaHQ9IjciLz48cmVjdCB4PSIxNCIgeT0iMyIgd2lkdGg9IjciIGhlaWdodD0iNyIvPjxyZWN0IHg9IjE0IiB5PSIxNCIgd2lkdGg9IjciIGhlaWdodD0iNyIvPjxyZWN0IHg9IjMiIHk9IjE0IiB3aWR0aD0iNyIgaGVpZ2h0PSI3Ii8+PC9zdmc+" class="inspector-icon" alt="Inspect">
+    <span>Storage</span>
+</button>
+
+<!-- ========================================
+     REQUIRED IMPORTS
+     Add these to index.html <head> section
+     ======================================== -->
+
+<!-- Storage Inspector Styles -->
+<link rel="stylesheet" href="storage-inspector.css">
+
+<!-- Storage Inspector Script (Add before closing </body>) -->
+<script src="storage-inspector.js"></script>

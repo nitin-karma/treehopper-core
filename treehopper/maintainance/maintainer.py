@@ -23,9 +23,10 @@ import os
 import time
 import shutil
 import zipfile
+import random
+from typing import Dict, cast, Any
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Dict
 from collections import Counter
 from treehopper.logging import get_logger
 from treehopper.th_config import (
@@ -293,6 +294,80 @@ def storage_metrics() -> Dict:
     print(res)
     logger.info(res)
     return res
+
+
+def mock_storage_metrics() -> Dict:
+    """
+    Returns a random storage metric JSON for testing frontend UI states.
+    1. Healthy (< 80%)
+    2. Warning (80-95%)
+    3. Critical (> 95%)
+    """
+
+    mock_responses = [
+        # 1. HEALTHY
+        {
+            "db": {
+                "path": "/Users/nitinkumarkarma/.treehopper/dashboard_db/dashboard_config.db",
+                "size_mb": 45.23,
+                "limit_mb": 2048,
+                "usage_pct": 2.2,
+            },
+            "files": {
+                "runtime_mb": 123.45,
+                "events_mb": 67.89,
+                "archive_mb": 234.56,
+                "treehopper_mb": 567.89,
+            },
+            "thresholds": {"warning_pct": 80, "critical_pct": 95},
+        },
+        # 2. WARNING
+        {
+            "db": {
+                "path": "/Users/nitinkumarkarma/.treehopper/dashboard_db/dashboard_config.db",
+                "size_mb": 1740.8,
+                "limit_mb": 2048,
+                "usage_pct": 85.0,
+            },
+            "files": {
+                "runtime_mb": 456.78,
+                "events_mb": 234.56,
+                "archive_mb": 890.12,
+                "treehopper_mb": 3245.67,
+            },
+            "thresholds": {"warning_pct": 80, "critical_pct": 95},
+        },
+        # 3. CRITICAL
+        {
+            "db": {
+                "path": "/Users/nitinkumarkarma/.treehopper/dashboard_db/dashboard_config.db",
+                "size_mb": 1966.08,
+                "limit_mb": 2048,
+                "usage_pct": 96.0,
+            },
+            "files": {
+                "runtime_mb": 890.45,
+                "events_mb": 567.89,
+                "archive_mb": 1234.56,
+                "treehopper_mb": 4567.89,
+            },
+            "thresholds": {"warning_pct": 80, "critical_pct": 95},
+        },
+    ]
+
+    # Pick one randomly
+    res = cast(Dict[str, Any], random.choice(mock_responses))
+    # res = random.choice(mock_responses)
+
+    # Logging to match your original function's behavior
+    print(f"[MOCK DATA] Usage: {res['db']['usage_pct']}%")
+    return res
+
+
+def get_storage_metrics(mock: bool = False):
+    if mock:
+        return mock_storage_metrics()
+    return storage_metrics()  # Your real function
 
 
 # ============================================================

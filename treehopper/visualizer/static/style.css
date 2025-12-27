@@ -1151,10 +1151,27 @@ body.light-mode .dashboard-footer {
   color: #475569;
 }
 
+/* Footer Logo - Enhanced Styling */
 .footer-logo {
   height: 24px;
   width: auto;
-  border-radius: 4px;
+  border-radius: 6px;
+  filter: brightness(1.1) contrast(1.1);
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.2);
+  border: 1px solid rgba(16, 185, 129, 0.15);
+  transition: all 0.3s ease;
+}
+
+.footer-logo:hover {
+  transform: scale(1.1);
+  box-shadow: 0 3px 8px rgba(16, 185, 129, 0.3);
+}
+
+body.light-mode .footer-logo {
+  filter: brightness(1) contrast(1.15);
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.2),
+              0 1px 2px rgba(0, 0, 0, 0.1);
+  border-color: rgba(16, 185, 129, 0.25);
 }
 
 /* Scrollbar Styling */
@@ -1715,4 +1732,120 @@ body.light-mode .tab-btn.active {
     .tab-icon {
         font-size: 22px;
     }
+}
+
+
+/* ========================================
+   STORAGE INSPECTOR BUTTON - Add to style.css
+   Matches the existing header controls style
+   ======================================== */
+
+/* Storage Inspector Button - Enhanced */
+.storage-inspector-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  /* GREEN themed to match other buttons */
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: 12px;
+  color: #10b981;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+  height: 40px;
+}
+
+.storage-inspector-btn:hover {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: rgba(16, 185, 129, 0.4);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+
+.storage-inspector-btn:active {
+  transform: translateY(0);
+}
+
+body.light-mode .storage-inspector-btn {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #059669;
+}
+
+body.light-mode .storage-inspector-btn:hover {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(16, 185, 129, 0.45);
+}
+
+.storage-icon {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  flex-shrink: 0;
+}
+
+.storage-label {
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+
+/* Hide label on mobile */
+@media (max-width: 768px) {
+  .storage-label {
+      display: none;
+  }
+
+  .storage-inspector-btn {
+      padding: 8px 12px;
+  }
+}
+
+
+/* Adjust header-controls spacing for new button */
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px; /* Spacing between elements */
+}
+
+/* Ensure storage button aligns with ECG monitor */
+.status-monitor {
+  height: 40px;
+}
+
+/* Header Logo - Enhanced Styling */
+.header .logo {
+  width: 50px;
+  height: 50px;
+  border-radius: 12px;
+  object-fit: cover;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+  border: 2px solid rgba(16, 185, 129, 0.2);
+  transition: all 0.3s ease;
+  /* Add brightness and contrast to make it pop */
+  filter: brightness(1.1) contrast(1.1);
+}
+
+.header .logo:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.4);
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+/* Light mode logo adjustments */
+body.light-mode .header .logo {
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25),
+              0 2px 4px rgba(0, 0, 0, 0.1);
+  border: 2px solid rgba(16, 185, 129, 0.3);
+  filter: brightness(1) contrast(1.15);
+}
+
+body.light-mode .header .logo:hover {
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.35),
+              0 4px 8px rgba(0, 0, 0, 0.15);
+  border-color: rgba(16, 185, 129, 0.5);
 }

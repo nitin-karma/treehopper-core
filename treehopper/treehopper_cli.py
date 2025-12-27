@@ -1,5 +1,10 @@
 # treehopper/treehopper_cli.py
 import os
+
+# Add these with the other imports at the top
+import uuid
+
+# import importlib.util
 import sys
 import argparse
 from pathlib import Path
@@ -26,7 +31,8 @@ from treehopper.chains_agents_refresh_status import (
 
 from treehopper.whatis import print_whatis
 from treehopper.th_ui_cli import launch_ui, stop_ui
-from treehopper.visualizer.db_util import db
+
+# from treehopper.visualizer.db_init import DBInitializer
 from treehopper.admin_cli import admin_entry
 from treehopper.maintainance.maintainer import startup_maintenance
 from treehopper.utils.commons import (
@@ -34,9 +40,21 @@ from treehopper.utils.commons import (
     load_agents_index,
     save_agents_index,
     ensure_registry_dirs,
+    validate_agent_name,
 )
 from treehopper.treehopper_cleaner import main as clean_main
 from treehopper.th_setup import setup_treehopper
+from treehopper.agent_template_cli import (
+    agent_create_from_template,
+    list_templates,
+)
+from treehopper.workspace_cli import workspace_create, workspace_info
+
+# Add with other imports
+from treehopper.sync_to_sqlite import sync_agents, sync_yaml
+
+from treehopper.help_str import help_string
+
 
 # ==============================================================================
 # GLOBAL OVERRIDE FOR DEVELOPMENT
@@ -53,11 +71,11 @@ if os.getenv("TREEHOPPER_FORCE_LOCAL", "1") == "1":
 # ==============================================================================
 
 import json
-import re
+
+# import re
 import shutil
 import subprocess
 import time
-import uuid
 import ast
 from typing import List
 import requests
@@ -184,27 +202,6 @@ def kill_pid(pid: int):
         logger.error(f"{str(e)}")
         return True
     return True
-
-
-# ---------------------------------------------------------------------
-# REGISTRY / SUBSCRIPTION HELPERS
-# ---------------------------------------------------------------------
-
-
-def validate_agent_name(name: str) -> str:
-    # strip accidental quotes / whitespace
-    clean = name.strip()
-
-    if " " in clean:
-        raise ValueError("Agent name cannot contain spaces")
-    if not re.match(r"^[a-zA-Z][a-zA-Z0-9_]{3,24}$", clean):
-        raise ValueError(
-            "Invalid agent name. Must:\n"
-            " • start with a letter\n"
-            " • be 4–25 chars\n"
-            " • contain only letters, numbers, underscore"
-        )
-    return clean.lower()
 
 
 # ---------------------------------------------------------------------
@@ -537,11 +534,13 @@ def init_agent(agent_name: str) -> None:
     agent_name = validate_agent_name(agent_name)
 
     if agent_name_exists(agent_name):
+        print(f"❌ Agent '{agent_name}' already exists")
         logger.info(f"❌ Agent '{agent_name}' already exists")
         sys.exit(1)
 
     target_dir = Path.cwd() / agent_name
     if target_dir.exists():
+        print(f"❌ Directory '{agent_name}' already exists here.")
         logger.info(f"❌ Directory '{agent_name}' already exists here.")
         sys.exit(1)
 
@@ -747,8 +746,9 @@ def build_agent(agent_ref: str) -> None:
     agent_name = validate_agent_name(cfg["agent_name"])
     agent_id = cfg["agent_id"]
     subscription_id = cfg["subscription_id"]
+    description = cfg.get("description") or ""
     entrypoint = cfg["entrypoint"]
-
+    tags = cfg.get("tags") or []
     # 🚨 enforce schema fields
     inputs = cfg.get("inputs")
     outputs = cfg.get("outputs")
@@ -780,15 +780,39 @@ def build_agent(agent_ref: str) -> None:
             "agent_id": agent_id,
             "subscription_id": subscription_id,
             "entrypoint": entrypoint,
+            "description": description,
             "routes": {
                 "by_name": f"/api/v1/agents/{agent_name}",
                 "by_id": f"/api/v1/agents/{agent_id}",
             },
             "inputs": inputs,
             "outputs": outputs,
+            "tags": tags,
         }
     )
     save_agents_index(index)
+    # ✅ NEW: Sync to SQLite
+    try:
+        sync_agents()
+        print("✅ Agent synced to database")
+        logger.info("✅ Agent synced to database")
+    except Exception as e:
+        print(f"⚠️  SQLite sync failed: {e}")
+        logger.error(f"⚠️  SQLite sync failed: {e}")
+
+    # ✅ NEW: Cache YAML in SQLite (Phase 2)
+    try:
+        sync_yaml(
+            entity_type="agent",
+            entity_name=agent_name,
+            entity_id=agent_id,
+            yaml_content=yaml.dump(cfg, default_flow_style=False, sort_keys=False),
+        )
+        logger.info("✅ Agent YAML cached in database")
+        print("✅ Agent YAML cached in database")
+    except Exception as e:
+        logger.error(f"⚠️  Failed to cache YAML: {e}")
+        print(f"⚠️  Failed to cache YAML: {e}")
 
     logger.info(f"✅ Built agent '{agent_name}' → {target_dir}")
     logger.info("📌 Call example:")
@@ -890,6 +914,13 @@ def delete_agent(ref: str):
     # remove from index
     index = [a for a in index if a["agent_id"] != agent_id]
     save_agents_index(index)
+    # ✅ NEW: Sync to SQLite
+    try:
+        sync_agents()
+        logger.info("[sqlite_sync] completed")
+    except Exception as e:
+        print(f"⚠️  SQLite sync failed: {e}")
+        logger.error(f"⚠️  SQLite sync failed: {e}")
 
     logger.info(f"🗑 Deleted agent '{agent_name}' ({agent_id})")
     logger.info("🔄 Restarting server to refresh agent registry...")
@@ -1118,89 +1149,19 @@ def agent_stop(ref: str) -> None:
 
 
 def print_help():
-    logger.info(
-        """
-Treehopper CLI Commands
-────────────────────────────────────────────
-  Main Server/Process commands
-  ============================
-  [treehopper | th] status                                Show if the main server is running
-  [treehopper | th] start                                 Start the main server
-  [treehopper | th] start --bg                            Start the main server in background
-  [treehopper | th] stop                                  Stop the main server
-  [treehopper | th] restart                               Restart main server
-  [treehopper | th] list_agents                           List installed agents
-  [treehopper | th] list_chains                           List installed chains
-  [treehopper | th] clean                                 Be Careful - To cleanup the servers, pids, agents, chain
-
-  Agent Related CLI Commands -
-  ============================
-  [treehopper | th] push-file <agent-name> <file_path>    To push the input file to agent for any file operations
-  [treehopper | th] call <path> '<json>' | --payload-file  Call an agent using the json payload or a json file
-  [treehopper | th] init <agent_name>                     Create agent scaffold template
-  [treehopper | th] lint <agent_folder>                   Validate handler.py + YAML
-  [treehopper | th] build <agent_folder>                  Install agent to registry and run with main server
-  [treehopper | th] agent info <ref>                      Show metadata
-  [treehopper | th] agent start <name> --detached         Start dedicated agent runtime in background
-  [treehopper | th] agent stop <name>                     Stop detached agent runtime
-  [treehopper | th] agent delete <ref>                    Delete installed agent safely
-
-  UI Related CLI Commands
-  ==========================
-  [treehopper | th] launch ui [optional --port <port>]     To launch the visualizer for the Agents, Chains, etc
-  [treehopper | th] stop ui                                To stop the visualizer for the Agents, Chains, etc
-
-  Chain Related CLI Commands
-  ==========================
-  [treehopper | th] chain                                 To view all Chain related commands
-"""
-    )
-
-    print(
-        """
-Treehopper CLI Commands
-────────────────────────────────────────────
-  Main Server/Process commands
-  ============================
-  [treehopper | th] status                                Show if the main server is running
-  [treehopper | th] start                                 Start the main server
-  [treehopper | th] start --bg                            Start the main server in background
-  [treehopper | th] stop                                  Stop the main server
-  [treehopper | th] restart                               Restart main server
-  [treehopper | th] list_agents                           List installed agents
-  [treehopper | th] list_chains                           List installed chains
-  [treehopper | th] clean                                 Be Careful - To cleanup the servers, pids, agents, chain
-
-  Agent Related CLI Commands -
-  ============================
-  [treehopper | th] push-file <agent-name> <file_path>    To push the input file to agent for any file operations
-  [treehopper | th] call <path> '<json>'| --payload-file  Call an agent using the escaped json payload or a json file
-  [treehopper | th] init <agent_name>                     Create agent scaffold template
-  [treehopper | th] lint <agent_folder>                   Validate handler.py + YAML
-  [treehopper | th] build <agent_folder>                  Install agent to registry and run with main server
-  [treehopper | th] agent info <ref>                      Show metadata
-  [treehopper | th] agent start <name> --detached         Start dedicated agent runtime in background
-  [treehopper | th] agent stop <name>                     Stop detached agent runtime
-  [treehopper | th] agent delete <ref>                    Delete installed agent safely
-
-  UI Related CLI Commands
-  ==========================
-  [treehopper | th] launch ui [optional --port <port>]     To launch the visualizer for the Agents, Chains, etc
-  [treehopper | th] stop ui                                To stop the visualizer for the Agents, Chains, etc
-
-  Chain Related CLI Commands
-  ==========================
-  [treehopper | th] chain                                 To view all Chain related commands
-"""
-    )
+    logger.info(help_string)
+    print(help_string)
 
 
 # ---------------------------------------------------------------------
 # MAIN
 # ---------------------------------------------------------------------
 def main() -> None:
-    logger.info("[treehopper_cli] Initialising the DB if not exists")
-    db.init_db()
+    logger.info("[treehopper_cli] Initialising TreehopperAI setup")
+    print("[treehopper_cli] Initialising TreehopperAI setup")
+    # dbInit = DBInitializer()
+    # dbInit.init_db()
+    setup_treehopper()
 
     # ✅ SAFE, FAST, ONE-TIME
     if not os.getenv("TH_TEST_MODE"):
@@ -1359,18 +1320,78 @@ def main() -> None:
         status()
     elif cmd == "agent":
         logger.info("agent command")
-        sub = sys.argv[2]
-        if sub == "start" and "--detached" in sys.argv:
-            logger.info("agent start detatched command")
-            if len(sys.argv) < 4:
+
+        if len(sys.argv) < 3:
+            print("Usage: treehopper agent <subcommand>")
+            print("\nSubcommands:")
+            print("  create <n> --from-template <t>  Create agent from template")
+            print("  build <n>                       Build and deploy agent")
+            print("  lint <n>                        Lint agent code")
+            print("  templates                       List available templates")
+            print("  start <n> --detached            Start detached runtime")
+            print("  stop <n>                        Stop detached runtime")
+            print("  info <n>                        Show agent metadata")
+            print("  delete <n>                      Delete agent")
+            sys.exit(1)
+
+        sub = sys.argv[2].lower()
+
+        # NEW: th agent create --from-template
+        if sub == "create":
+            logger.info("agent create command")
+
+            if len(sys.argv) < 5 or "--from-template" not in sys.argv:
                 print(
-                    "Usage: treehopper agent start <name> --detached "
-                    "[--port <port>] [--bg]"
+                    "Usage: th agent create <agent_name> --from-template <template_name>"
                 )
+                print("\nExample:")
+                print(
+                    "  th agent create my_email_listener --from-template email_listener"
+                )
+                print("\nList templates:")
+                print("  th agent templates")
+                sys.exit(1)
+
+            agent_name = sys.argv[3]
+            template_idx = sys.argv.index("--from-template")
+
+            if template_idx + 1 >= len(sys.argv):
+                print("❌ Missing template name after --from-template")
+                sys.exit(1)
+
+            template_name = sys.argv[template_idx + 1]
+            agent_create_from_template(agent_name, template_name)
+
+        # NEW: th agent build (alias)
+        elif sub == "build":
+            logger.info("agent build command (alias)")
+            if len(sys.argv) < 4:
+                print("Usage: th agent build <agent_name>")
+                sys.exit(1)
+            build_agent(sys.argv[3])
+
+        # NEW: th agent lint (alias)
+        elif sub == "lint":
+            logger.info("agent lint command (alias)")
+            if len(sys.argv) < 4:
+                print("Usage: th agent lint <agent_name>")
+                sys.exit(1)
+            lint_agent(sys.argv[3])
+
+        # NEW: th agent templates
+        elif sub == "templates":
+            logger.info("agent templates command")
+            list_templates()
+
+        # EXISTING: th agent start --detached
+        elif sub == "start" and "--detached" in sys.argv:
+            logger.info("agent start detached command")
+            if len(sys.argv) < 4:
+                print("Usage: treehopper agent start <n> --detached [--port <port>]")
                 sys.exit(1)
 
             ref = sys.argv[3]
-            port_override: int | None = None
+            port_override = None
 
             if "--port" in sys.argv:
                 logger.info("agent port command")
@@ -1386,9 +1407,9 @@ def main() -> None:
                     print("❌ Invalid value for --port (must be integer)")
                     sys.exit(1)
 
-            # --bg is accepted but not used (runtime is always backgrounded)
             agent_run_detached(ref, port_override)
 
+        # EXISTING: th agent stop
         elif sub == "stop":
             logger.info("agent stop command")
             if len(sys.argv) < 4:
@@ -1396,6 +1417,7 @@ def main() -> None:
                 sys.exit(1)
             agent_stop(sys.argv[3])
 
+        # EXISTING: th agent info
         elif sub == "info":
             logger.info("agent info command")
             if len(sys.argv) < 4:
@@ -1403,6 +1425,7 @@ def main() -> None:
                 sys.exit(1)
             agent_info(sys.argv[3])
 
+        # EXISTING: th agent delete
         elif sub == "delete":
             logger.info("agent delete command")
             if len(sys.argv) < 4:
@@ -1413,7 +1436,8 @@ def main() -> None:
         else:
             print(f"Unknown agent subcommand: {sub}")
             logger.info(f"Unknown agent subcommand: {sub}")
-            print_help()
+            print("\nAvailable subcommands:")
+            print("  create, build, lint, templates, start, stop, info, delete")
             sys.exit(1)
 
     elif cmd == "push-file":
@@ -1448,6 +1472,28 @@ def main() -> None:
         logger.info("setup command")
         success = setup_treehopper()
         sys.exit(0 if success else 1)
+
+    elif cmd == "workspace":
+        if len(sys.argv) < 3:
+            print("Usage: th workspace <subcommand>")
+            print("  create <n>  - Create empty directory")
+            print("  info        - Show current directory info")
+            sys.exit(1)
+
+        sub = sys.argv[2]
+
+        if sub == "create":
+            if len(sys.argv) < 4:
+                print("Usage: th workspace create <n>")
+                sys.exit(1)
+            workspace_create(sys.argv[3])
+
+        elif sub == "info":
+            workspace_info()
+
+        else:
+            print(f"Unknown: {sub}")
+            sys.exit(1)
 
     else:
         logger.info(f"Unknown command: {cmd}")

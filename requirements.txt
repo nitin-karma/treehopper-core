@@ -14,7 +14,7 @@ cffi==2.0.0
 cfgv==3.4.0
 charset-normalizer==3.4.4
 chroma-hnswlib==0.7.6
-chromadb==0.5.23
+chromadb==1.4.0
 click==8.3.1
 coloredlogs==15.0.1
 cryptography==46.0.3
@@ -118,7 +118,7 @@ tiktoken==0.12.0
 tokenizers==0.20.3
 tomli==2.3.0
 tqdm==4.67.1
--e git+https://github.com/nitin-karma/treehopper-core.git@78abf046e07a502f52fb4f00abae689c3f4e5634#egg=treehopperai_core
+-e git+https://github.com/nitin-karma/treehopper-core.git@141d8a626d87e9ffbb0f1683ab9a6da777d52413#egg=treehopperai_core
 typer==0.20.0
 typer-slim==0.20.0
 typing-inspection==0.4.2

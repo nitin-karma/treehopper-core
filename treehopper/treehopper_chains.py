@@ -1,7 +1,8 @@
 # treehopper/treehopper_chains.py
 import json
 import os
-import re
+
+# import re
 import signal
 import subprocess
 import sys
@@ -26,7 +27,7 @@ from treehopper.utils.shared_files import (
     has_only_one_shared_file,
     get_the_only_shared_file,
 )
-from treehopper.utils.commons import get_or_create_subscription_id
+from treehopper.utils.commons import get_or_create_subscription_id, validate_chain_name
 from treehopper.treehopper_parallel import parallel_chain_run_entry
 from treehopper.utils import run_registry as run_registry_mod
 from treehopper.utils.config import read_pid_and_port
@@ -52,7 +53,9 @@ from treehopper.th_config import (
     DEFAULT_API_KEY,
     ensure_dirs,
 )
-from treehopper.visualizer.db_util import db
+
+# from treehopper.visualizer.db_init import DBInitializer
+from treehopper.th_setup import setup_treehopper
 from treehopper.logging import get_logger
 from treehopper.maintainance.maintainer import startup_maintenance
 from treehopper.utils.commons import (
@@ -61,6 +64,9 @@ from treehopper.utils.commons import (
     load_agents_index,
     ensure_registry_dirs,
 )
+
+# Add with other imports
+from treehopper.sync_to_sqlite import sync_chains, sync_yaml
 
 logger = get_logger()
 logger.info("Inside Treehopper chains")
@@ -82,29 +88,6 @@ def is_port_in_use(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.2)
         return s.connect_ex(("127.0.0.1", port)) == 0
-
-
-def validate_chain_name(name: str) -> str:
-    """
-    Same rules as agent names:
-      - strip whitespace
-      - no spaces inside
-      - 4–25 chars
-      - start with a letter
-      - letters / numbers / underscore only
-    """
-    clean = name.strip()
-    if " " in clean:
-        raise ValueError("Chain name cannot contain spaces")
-
-    if not re.match(r"^[a-zA-Z][a-zA-Z0-9_]{3,24}$", clean):
-        raise ValueError(
-            "Invalid chain name. Must:\n"
-            " • start with a letter\n"
-            " • be 4–25 chars\n"
-            " • contain only letters, numbers, underscore"
-        )
-    return clean.lower()
 
 
 # def derive_chain_port(chain_id: str) -> int:
@@ -373,10 +356,27 @@ def chain_build(chain_name: str, agent_names: List[str]) -> None:
         yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8"
     )
 
-    chains_index.append(
-        {"chain_name": cname, "chain_id": chain_id, "subscription_id": subscription_id}
-    )
+    chains_index.append(cfg)
     save_chains_index(chains_index)
+    # ✅ NEW: Sync to SQLite
+    try:
+        sync_chains()
+        logger.info("[sqlite_sync] completed")
+    except Exception as e:
+        print(f"⚠️  SQLite sync failed: {e}")
+        logger.error(f"⚠️  SQLite sync failed: {e}")
+
+    # ✅ NEW: Cache YAML in SQLite (Phase 2)
+    try:
+        sync_yaml(
+            entity_type="chain",
+            entity_name=cname,
+            entity_id=chain_id,
+            yaml_content=yaml.dump(cfg, default_flow_style=False, sort_keys=False),
+        )
+        print("✅ Chain YAML cached in database")
+    except Exception as e:
+        print(f"⚠️  Failed to cache YAML: {e}")
 
     print(f"✅ Created chain '{cname}' ({chain_id})")
     print(f"📌 Endpoint: {endpoint} [POST]")
@@ -963,6 +963,14 @@ def chain_delete_single(ref: str) -> bool:
         if len(index) < original_len:
             save_chains_index(index)
             print("📦 Chain removed from registry index")
+            # ✅ NEW: Sync to SQLite
+            try:
+                sync_chains()
+                logger.info("[chain_delete_single] sqlite_sync")
+            except Exception as e:
+                print(f"⚠️  SQLite sync failed: {e}")
+                logger.error(f"⚠️  SQLite sync failed: {e}")
+
         else:
             print("⚠️ Chain not found in registry index (skipped)")
 
@@ -1501,10 +1509,30 @@ def chain_build_multistep(chain_name: str, steps: List[Dict[str, Any]]):
         yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8"
     )
 
-    chains_index.append(
-        {"chain_name": cname, "chain_id": chain_id, "subscription_id": subscription_id}
-    )
+    chains_index.append(cfg)
     save_chains_index(chains_index)
+    # ✅ NEW: Sync to SQLite
+    try:
+        sync_chains()
+        print("✅ Chain synced to database")
+        logger.info("✅ Chain synced to database")
+    except Exception as e:
+        print(f"⚠️  SQLite sync failed: {e}")
+        logger.error(f"⚠️  SQLite sync failed: {e}")
+
+    # ✅ NEW: Cache YAML in SQLite (Phase 2)
+    try:
+        sync_yaml(
+            entity_type="chain",
+            entity_name=cname,
+            entity_id=chain_id,
+            yaml_content=yaml.dump(cfg, default_flow_style=False, sort_keys=False),
+        )
+        logger.info("✅ Chain YAML cached in database")
+        print("✅ Chain YAML cached in database")
+    except Exception as e:
+        logger.error(f"⚠️  Failed to cache YAML: {e}")
+        print(f"⚠️  Failed to cache YAML: {e}")
 
     print(f"✅ Multi-step chain created: {cname} ({chain_id})")
     for s in steps:
@@ -1791,8 +1819,12 @@ def validate_routing_rules(cfg):
 
 
 def chain_entry(argv: List[str]) -> None:
-    logger.info("[treehopper_chains] Initialising the DB if not exists")
-    db.init_db()
+    # logger.info("[treehopper_chains] Initialising the DB if not exists")
+    # dbInit = DBInitializer()
+    # dbInit.init_db()
+    logger.info("[treehopper_cli] Initialising TreehopperAI setup")
+    print("[treehopper_cli] Initialising TreehopperAI setup")
+    setup_treehopper()
 
     if not os.getenv("TH_TEST_MODE"):
         logger.info("[treehopper_chains] Ensuring all directories exists")

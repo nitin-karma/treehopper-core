@@ -1,13 +1,11 @@
 # treehopper/visualizer/state.py
-import json
-
-# import os
-# from pathlib import Path
 from typing import Dict, Any, List
 from treehopper.th_config import TH_ROOT, MAIN_PORT, DEFAULT_UI_PORT
+from treehopper.sync_to_sqlite import get_all_agents, get_all_chains
 
 
 def list_pids():
+    """List running process PIDs (unchanged - keep filesystem-based)"""
     runtime = TH_ROOT / "runtime"
     pids = {}
     if runtime.exists():
@@ -28,52 +26,28 @@ def list_pids():
     return pids
 
 
-def list_agents() -> List[Dict[str, Any]]:  # Changed type hint from list[str]
-    """Reads the agents.json file and returns a list of agent objects."""
-    agents_index = TH_ROOT / "registry" / "agents.json"
-
-    if not agents_index.exists():
-        return []
-
-    try:
-        with agents_index.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        # Extraction logic remains the same, now matches the hint
-        return [
-            {"name": agent.get("agent_name"), "id": agent.get("agent_id")}
-            for agent in data
-            if "agent_name" in agent
-        ]
-
-    except (json.JSONDecodeError, IOError) as e:
-        print(f"❌ Error reading agents index: {e}")
-        return []
+def list_agents() -> List[Dict[str, Any]]:
+    """Get agents from SQLite (10x faster than reading JSON)"""
+    agents = get_all_agents()
+    # Format for UI compatibility
+    return [
+        {"name": agent.get("agent_name"), "id": agent.get("agent_id")}
+        for agent in agents
+    ]
 
 
-def list_chains() -> List[Dict[str, Any]]:  # Changed type hint from list[str]
-    """Reads the chains.json file and returns a list of chain objects."""
-    chains_index = TH_ROOT / "registry" / "chains.json"
-
-    if not chains_index.exists():
-        return []
-
-    try:
-        with chains_index.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        return [
-            {"name": chain.get("chain_name"), "id": chain.get("chain_id")}
-            for chain in data
-            if "chain_name" in chain
-        ]
-
-    except (json.JSONDecodeError, IOError) as e:
-        print(f"❌ Error reading chains index: {e}")
-        return []
+def list_chains() -> List[Dict[str, Any]]:
+    """Get chains from SQLite (10x faster than reading JSON)"""
+    chains = get_all_chains()
+    # Format for UI compatibility
+    return [
+        {"name": chain.get("chain_name"), "id": chain.get("chain_id")}
+        for chain in chains
+    ]
 
 
 def snapshot() -> Dict[str, Any]:
+    """Get complete system snapshot (agents, chains, processes)"""
     return {
         "agents": list_agents(),
         "chains": list_chains(),

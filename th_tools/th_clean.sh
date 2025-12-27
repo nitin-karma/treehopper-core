@@ -39,18 +39,31 @@ if [[ $YES -ne 1 ]]; then
 fi
 
 echo ""
-echo "🔫 Stopping running services..."
+echo "🔫 Stopping Treehopper Services..."
 
+# 1. Kill processes by name/command pattern
+# This stops the backend, active runs, and the UI launcher
 pkill -f "uvicorn" 2>/dev/null
 pkill -f "treehopper run" 2>/dev/null
+pkill -f "treehopper launch ui" 2>/dev/null
+pkill -f "th launch ui" 2>/dev/null
 pkill -f "treehopper" 2>/dev/null
 
+# 2. Clear Backend Server (Port 1567)
 if lsof -i :1567 > /dev/null 2>&1; then
     PID=$(lsof -t -i :1567)
-    echo "⚠️  Port 1567 occupied — killing PID $PID"
+    echo "⚠️  Backend (1567) occupied — killing PID $PID"
     kill -9 "$PID" 2>/dev/null
 fi
 
+# 3. Clear UI Dashboard (Port 8090)
+if lsof -i :8090 > /dev/null 2>&1; then
+    PID=$(lsof -t -i :8090)
+    echo "⚠️  UI Dashboard (8090) occupied — killing PID $PID"
+    kill -9 "$PID" 2>/dev/null
+fi
+
+# 4. Cleanup Backend PID File
 MAIN_PID_FILE="$TH_ROOT/runtime/main_server.pid"
 if [[ -f "$MAIN_PID_FILE" ]]; then
   PID=$(cat "$MAIN_PID_FILE")
@@ -58,6 +71,16 @@ if [[ -f "$MAIN_PID_FILE" ]]; then
   rm -f "$MAIN_PID_FILE"
 fi
 
+# 5. Cleanup UI PID File
+# Assuming your launch command saves a PID file here
+UI_PID_FILE="$TH_ROOT/runtime/ui.pid"
+if [[ -f "$UI_PID_FILE" ]]; then
+  PID=$(cat "$UI_PID_FILE")
+  echo "🧹 Cleaning up UI PID file"
+  kill -9 "$PID" 2>/dev/null
+  rm -f "$UI_PID_FILE"
+fi
+echo "✅ main server and ui services stopped."
 echo ""
 echo "🗑 Removing runtime logs and PIDs..."
 rm -f "$TH_ROOT/runtime/"*.pid

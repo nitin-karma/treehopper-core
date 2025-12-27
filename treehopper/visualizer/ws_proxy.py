@@ -3,8 +3,9 @@
 import json
 import websockets
 from websockets.exceptions import InvalidStatus, ConnectionClosed
+from treehopper.th_config import DEFAULT_API_KEY
 
-API_KEY = "demo-key-123"
+API_KEY = DEFAULT_API_KEY
 
 
 async def proxy_chain_ws(chain_port: int, run_id: str, sink):

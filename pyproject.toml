@@ -23,7 +23,7 @@ dependencies = [
     "anthropic>=0.20",
     "google-generativeai>=0.4",
     "tiktoken>=0.6",
-    "chromadb>=0.4,<0.6",
+    "chromadb>=1.4.0",
     "pyyaml",
     "tabulate",
     "websocket-client",
