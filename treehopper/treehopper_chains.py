@@ -67,6 +67,7 @@ from treehopper.utils.commons import (
 
 # Add with other imports
 from treehopper.sync_to_sqlite import sync_chains, sync_yaml
+from treehopper.visualizer.chain_vu import chain_flow_viewer
 
 logger = get_logger()
 logger.info("Inside Treehopper chains")
@@ -1308,7 +1309,9 @@ Other Commands
   [treehopper | th] chain delete <name|id>          Delete chain & history.
   [treehopper | th] chain logs <name|id>            Show last run summary.
   [treehopper | th] chains status                   show all running chains.
-
+  [treehopper | th] chain vu <name>                 Visualize chain logic flow
+  [treehopper | th] chain vu <name> --raw           View raw YAML source
+  [treehopper | th] chain vu <name> --json          View raw parsed JSON structure
 """
     )
 
@@ -1822,15 +1825,15 @@ def chain_entry(argv: List[str]) -> None:
     # logger.info("[treehopper_chains] Initialising the DB if not exists")
     # dbInit = DBInitializer()
     # dbInit.init_db()
-    logger.info("[treehopper_cli] Initialising TreehopperAI setup")
-    print("[treehopper_cli] Initialising TreehopperAI setup")
+    logger.info("[treehopper_chains] Initialising TreehopperAI setup")
+    print("[treehopper_chains] Initialising TreehopperAI setup")
     setup_treehopper()
 
     if not os.getenv("TH_TEST_MODE"):
         logger.info("[treehopper_chains] Ensuring all directories exists")
         ensure_dirs()
-        print("[treehopper_cli] Ensuring maintaince checks and actions")
-        logger.info("[treehopper_cli] Ensuring maintaince checks and actions")
+        print("[treehopper_chains] Ensuring maintaince checks and actions")
+        logger.info("[treehopper_chains] Ensuring maintaince checks and actions")
         startup_maintenance()
 
     if not argv:
@@ -1840,6 +1843,8 @@ def chain_entry(argv: List[str]) -> None:
     sub = argv[0].lower()
 
     if sub in {
+        "vu",
+        "view",
         "build",
         "start",
         "run",
@@ -2198,6 +2203,17 @@ def chain_entry(argv: List[str]) -> None:
                 completed, cancelled
             """
             chain_sweep_resume()
+            return
+
+        if sub in ("vu", "view"):
+            if len(argv) < 2:
+                print("Usage: treehopper chain vu <chain_name> [--raw] [--json]")
+                sys.exit(1)
+
+            chain_name = argv[1]
+            show_raw = "--raw" in argv
+            show_json = "--json" in argv
+            chain_flow_viewer(chain_name, raw_yaml=show_raw, raw_json=show_json)
             return
 
     # fall back → legacy mode

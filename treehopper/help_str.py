@@ -14,9 +14,12 @@ Treehopper CLI Commands
   [treehopper | th] list_agents                           List installed agents
   [treehopper | th] list_chains                           List installed chains
 
-  Agent Related CLI Commands -
+  Push file to root for input
   ============================
   [treehopper | th] push-file <agent-name> <file_path>    To push the input file to agent for any file operations
+
+  Agent Related CLI Commands -
+  ============================
   [treehopper | th] call <path> '<json>' | --payload-file  Call an agent using the json payload or a json file
   [treehopper | th] init <agent_name>                     Create agent scaffold template
   [treehopper | th] lint <agent_folder>                   Validate handler.py + YAML
