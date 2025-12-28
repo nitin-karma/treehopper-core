@@ -44,6 +44,13 @@ Treehopper CLI Commands
   [treehopper | th] view db --all                         Full inspection (latest 100 records for all tables)
   [treehopper | th] view db --all --limit <number>        Dumps the last 10 records of every table.
 
+  Log Related CLI Commands (Local Time)
+  =====================================
+  [treehopper | th] view logs                             Show latest 50 log entries in local time
+  [treehopper | th] view logs --tail <n>                  Show latest <n> log entries
+  [treehopper | th] view logs --level <LVL>               Filter logs by level (INFO, ERROR, DEBUG)
+  [treehopper | th] view logs --all                       Dump all historical logs from the log directory
+
   [! BE CAREFUL] Maintainance CLI Commands
   =========================================
   [treehopper | th] admin snapshot-db        Snapshot analytics DB

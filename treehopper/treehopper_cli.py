@@ -57,6 +57,8 @@ from treehopper.visualizer.inspect_db import (
     run_view_db,
 )  # Assuming logic is in a separate file or import it here
 
+from treehopper.visualizer.log_tail import run_view_logs
+
 # ==============================================================================
 # GLOBAL OVERRIDE FOR DEVELOPMENT
 # Make CLI always import local treehopper source first (instead of pip package)
@@ -1144,6 +1146,23 @@ def agent_stop(ref: str) -> None:
     print("✔ Stopped")
 
 
+def view_logs_cmd(args_list: list[str]) -> None:
+    # 1. Update the parser to accept --level
+    parser = argparse.ArgumentParser(description="View Treehopper logs", add_help=False)
+    parser.add_argument("--all", action="store_true")
+    parser.add_argument("--tail", type=int)
+    parser.add_argument("--level", type=str)  # <--- Add this line
+
+    try:
+        args = parser.parse_args(args_list)
+        # 2. Ensure the level is passed to the implementation function
+        run_view_logs(tail=args.tail, show_all=args.all, level_filter=args.level)
+    except Exception as e:
+        # If argparse fails, it often prints its own error,
+        # but we catch other exceptions here.
+        print(f"❌ Error parsing log arguments: {e}")
+
+
 def view_db_cmd(args_list: list[str]) -> None:
     parser = argparse.ArgumentParser(
         description="Inspect Treehopper database", add_help=False
@@ -1534,6 +1553,8 @@ def main() -> None:
         if target == "db":
             # Pass everything after 'th view db' to the handler
             view_db_cmd(sys.argv[3:])
+        elif target == "logs":
+            view_logs_cmd(sys.argv[3:])  # Added this
         else:
             print(f"Unknown view target: {target}")
 
