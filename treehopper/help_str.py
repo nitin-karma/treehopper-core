@@ -38,6 +38,11 @@ Treehopper CLI Commands
   ==========================
   [treehopper | th] chain                                 To view all Chain related commands
 
+  System Inspection Commands
+  ==========================
+  [treehopper | th] show root                          Show full TH_ROOT directory structure as a tree
+  [treehopper | th] show pids                          List all active process IDs and assigned ports
+
   DB Related CLI Commands
   ==========================
   [treehopper | th] view db --show-tables                 List all database tables and row counts

@@ -470,6 +470,8 @@ def chain_start(chain_ref: ChainRef, port_override: int | None = None) -> None:
 
     proc = subprocess.Popen(
         [
+            sys.executable,
+            "-m",
             "uvicorn",
             "treehopper.chain_runtime_app:app",
             "--host",
@@ -638,6 +640,8 @@ def chain_run_detached(
 
         proc = subprocess.Popen(
             [
+                sys.executable,
+                "-m",
                 "uvicorn",
                 "treehopper.chain_runtime_app:app",
                 "--host",
@@ -829,7 +833,8 @@ def chain_run_detached(
 #         # Launch chain runtime
 #         # ======================================================================
 #         proc = subprocess.Popen(
-#             [
+#             [    sys.executable,
+#                   "-m",
 #                 "uvicorn",
 #                 "treehopper.chain_runtime_app:app",
 #                 "--host",

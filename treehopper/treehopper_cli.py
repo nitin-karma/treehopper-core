@@ -58,6 +58,7 @@ from treehopper.visualizer.inspect_db import (
 )  # Assuming logic is in a separate file or import it here
 
 from treehopper.visualizer.log_tail import run_view_logs
+from treehopper.visualizer.system_view import show_root_tree, show_pids
 
 # ==============================================================================
 # GLOBAL OVERRIDE FOR DEVELOPMENT
@@ -261,6 +262,12 @@ def run(
 
     # foreground mode
     write_pid(MAIN_PID_FILE, os.getpid())
+    logger.info("🚀 Starting Treehopper in FOREGROUND")
+    logger.info(
+        f"🐍 Python Interpreter: {sys.executable}"
+    )  # Adds transparency to the demo
+    print("🚀 Starting Treehopper in FOREGROUND")
+    print(f"🐍 Python Interpreter: {sys.executable}")  # Adds transparency to the demo
     uvicorn.run(
         "treehopper.treehopper:app",
         host="0.0.0.0",
@@ -1097,6 +1104,8 @@ def agent_run_detached(
 
     proc = subprocess.Popen(
         [
+            sys.executable,
+            "-m",
             "uvicorn",
             "treehopper.agent_runtime_app:app",
             "--host",
@@ -1557,6 +1566,20 @@ def main() -> None:
             view_logs_cmd(sys.argv[3:])  # Added this
         else:
             print(f"Unknown view target: {target}")
+
+    elif cmd == "show":
+        if len(sys.argv) < 3:
+            print("Usage: th show [root|pids]")
+            sys.exit(1)
+
+        target = sys.argv[2].lower()
+
+        if target == "root":
+            show_root_tree()
+        elif target == "pids":
+            show_pids()
+        else:
+            print(f"Unknown show target: {target}")
 
     else:
         logger.info(f"Unknown command: {cmd}")
