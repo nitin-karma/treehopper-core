@@ -4,12 +4,12 @@
 
 ### The Agent Builder & Orchestration Automation Runtime
 
-**Create, chain, and orchestrate autonomous agents — locally, on edge devices, or in distributed fleets.**
+**Create, chain, and orchestrate agents — locally, on edge devices, or in distributed fleets.**
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-✔-green)](https://fastapi.tiangolo.com/)
 [![ChromaDB](https://img.shields.io/badge/ChromaDB-Memory-orange)](https://www.trychroma.com/)
-[![LLM Providers](https://img.shields.io/badge/LLM%20Providers-OpenAI%20%7C%20Gemini%20%7C%20Perplexity-purple)](#)
+[![LLM Providers](https://img.shields.io/badge/LLM%20Provider-OpenAI-purple)](#)
 [![Status](https://img.shields.io/badge/Status-Active-brightgreen)](#)
 
 </div>

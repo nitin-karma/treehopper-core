@@ -52,9 +52,10 @@ from treehopper.workspace_cli import workspace_create, workspace_info
 
 # Add with other imports
 from treehopper.sync_to_sqlite import sync_agents, sync_yaml
-
 from treehopper.help_str import help_string
-
+from treehopper.visualizer.inspect_db import (
+    run_view_db,
+)  # Assuming logic is in a separate file or import it here
 
 # ==============================================================================
 # GLOBAL OVERRIDE FOR DEVELOPMENT
@@ -1143,6 +1144,34 @@ def agent_stop(ref: str) -> None:
     print("✔ Stopped")
 
 
+def view_db_cmd(args_list: list[str]) -> None:
+    parser = argparse.ArgumentParser(
+        description="Inspect Treehopper database", add_help=False
+    )
+    parser.add_argument("--show-tables", action="store_true")
+    parser.add_argument("--all", action="store_true")  # New flag
+    parser.add_argument("--table", type=str)
+    parser.add_argument("--limit", type=int, default=20)
+    parser.add_argument("--search", "-s", type=str)
+
+    try:
+        args = parser.parse_args(args_list)
+
+        # Override limit to 100 if --all is used and user hasn't specified a limit
+        final_limit = 100 if args.all and "--limit" not in args_list else args.limit
+
+        run_view_db(
+            show_tables=args.show_tables,
+            table=args.table,
+            limit=final_limit,
+            search=args.search,
+            show_all=args.all,
+        )
+    except Exception as e:
+        logger.error(f"❌ Error: {e}")
+        print(f"❌ Error: {e}")
+
+
 # ---------------------------------------------------------------------
 # TREEHOPPER HELP
 # ---------------------------------------------------------------------
@@ -1494,6 +1523,19 @@ def main() -> None:
         else:
             print(f"Unknown: {sub}")
             sys.exit(1)
+
+    elif cmd == "view":
+        logger.info("view command")
+        if len(sys.argv) < 3:
+            print("Usage: treehopper view db [--show-tables] [--table <name>]")
+            sys.exit(1)
+
+        target = sys.argv[2].lower()
+        if target == "db":
+            # Pass everything after 'th view db' to the handler
+            view_db_cmd(sys.argv[3:])
+        else:
+            print(f"Unknown view target: {target}")
 
     else:
         logger.info(f"Unknown command: {cmd}")

@@ -1,55 +1,125 @@
+# treehopper/visualiser/inspect_db.py
+
 import sqlite3
+import click
 from pathlib import Path
+from tabulate import tabulate
 from treehopper.th_config import TH_ROOT, DB_DIR, DASHBOARD_DB_NAME
 
 
-def inspect():
+def run_view_db(show_tables=False, table=None, limit=20, search=None, show_all=False):
+    """Core logic extracted from Click so it can be called by argparse or Click."""
     db_path = Path(TH_ROOT) / DB_DIR / DASHBOARD_DB_NAME
+
     if not db_path.exists():
-        print(f"[-] Database not found at {db_path}")
+        print(f"❌ Database not found at {db_path}")
         return
 
-    conn = sqlite3.connect(db_path)
-    # Using Row factory allows us to access data by column name
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
 
-    print(f"\n[!] FULL DATABASE INSPECTION: {db_path}")
-    print("=" * 60)
+        # Get all table names for use in 'show_tables' or 'show_all'
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+        )
+        all_tables = [t["name"] for t in cursor.fetchall()]
 
-    # Get list of all tables in the database
-    cursor.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
-    )
-    tables = [row["name"] for row in cursor.fetchall()]
+        if show_tables:
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+            )
+            tables = cursor.fetchall()
+            table_data = []
+            for t in tables:
+                t_name = t["name"]
+                cursor.execute(f"SELECT COUNT(*) FROM {t_name}")
+                count = cursor.fetchone()[0]
+                table_data.append([t_name, count])
+            print(
+                tabulate(
+                    table_data,
+                    headers=["Table Name", "Total Rows"],
+                    tablefmt="rounded_grid",
+                )
+            )
 
-    for table in tables:
-        print(f"\n>>> TABLE: {table}")
-        print("-" * 30)
+        # --- MODE 2: SHOW ALL TABLES (LATEST RECORDS) ---
+        elif show_all:
+            print(f"\n🚀 Full Database Inspection (Latest {limit} records per table)")
+            for t_name in all_tables:
+                print(f"\n📂 TABLE: {t_name}")
+                # We attempt to sort by 'id' or 'created_at' if they exist, otherwise just limit
+                cursor.execute(f"PRAGMA table_info({t_name})")
+                cols = [c["name"] for c in cursor.fetchall()]
 
-        # 1. Show Schema/Columns
-        cursor.execute(f"PRAGMA table_info({table})")
-        cols = cursor.fetchall()
-        col_names = [c["name"] for c in cols]
-        print(f"Columns: {', '.join(col_names)}")
+                order_by = ""
+                if "id" in cols:
+                    order_by = " ORDER BY id DESC"
+                elif "created_at" in cols:
+                    order_by = " ORDER BY created_at DESC"
 
-        # 2. Show All Data
-        cursor.execute(f"SELECT * FROM {table}")
-        rows = cursor.fetchall()
+                cursor.execute(f"SELECT * FROM {t_name}{order_by} LIMIT {limit}")
+                rows = cursor.fetchall()
 
-        if not rows:
-            print("  (Table is empty)")
-        else:
+                if not rows:
+                    print("  (Empty)")
+                    continue
+
+                formatted = []
+                for r in rows:
+                    d = dict(r)
+                    if "password_hash" in d:
+                        d["password_hash"] = "********"
+                    formatted.append(list(d.values()))
+
+                print(tabulate(formatted, headers=cols, tablefmt="rounded_grid"))
+
+        elif table:
+            cursor.execute(f"PRAGMA table_info({table})")
+            columns = [c["name"] for c in cursor.fetchall()]
+            if not columns:
+                print(f"❌ Error: Table '{table}' does not exist.")
+                return
+
+            query = f"SELECT * FROM {table}"
+            params = []
+            if search:
+                search_conditions = [f"CAST({col} AS TEXT) LIKE ?" for col in columns]
+                query += " WHERE " + " OR ".join(search_conditions)
+                params = [f"%{search}%"] * len(columns)
+
+            query += f" LIMIT {limit}"
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+            if not rows:
+                print(
+                    f"ℹ️  No results found in '{table}'"
+                    + (f" matching '{search}'" if search else "")
+                )
+                return
+
+            formatted_rows = []
             for row in rows:
-                # Convert row to dict to print keys and values clearly
-                row_data = {k: row[k] for k in row.keys()}
-                # Mask password hashes for security in console output
-                if "password_hash" in row_data:
-                    row_data["password_hash"] = "********"
-                print(f"  {row_data}")
+                dict_row = dict(row)
+                if "password_hash" in dict_row:
+                    dict_row["password_hash"] = "********"
+                formatted_rows.append(list(dict_row.values()))
 
-    conn.close()
+            print(tabulate(formatted_rows, headers=columns, tablefmt="rounded_grid"))
+    finally:
+        if conn:
+            conn.close()
 
 
-if __name__ == "__main__":
-    inspect()
+# The Click wrapper (keep this if you still want to use Click elsewhere)
+@click.command(name="db")
+@click.option("--show-tables", is_flag=True)
+@click.option("--table", type=str)
+@click.option("--limit", default=20, type=int)
+@click.option("--search", "-s", type=str)
+def view_db_click(show_tables, table, limit, search):
+    run_view_db(show_tables, table, limit, search)
