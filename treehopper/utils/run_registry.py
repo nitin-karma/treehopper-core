@@ -26,9 +26,6 @@ MAX_RUNS_PER_CHAIN = 50
 
 
 def _ensure_runs_dir(chain_dir: Path) -> Path:
-    print(
-        "[_ensure_runs_dir] i am called here in run_registry.py, cancels dir {CANCEL_DIR}"
-    )
     logger.info(
         "[_ensure_runs_dir] i am called here in run_registry.py, cancels dir {CANCEL_DIR}"
     )
@@ -38,7 +35,6 @@ def _ensure_runs_dir(chain_dir: Path) -> Path:
 
 
 def _now_iso() -> str:
-    print("[_now_iso] i am called here in run_registry.py, cancels dir {CANCEL_DIR}")
     logger.info(
         "[_now_iso] i am called here in run_registry.py, cancels dir {CANCEL_DIR}"
     )
@@ -58,7 +54,6 @@ def make_run_id(chain_name: str) -> str:
     Example:
       demo-1765805542341-a3f9c2
     """
-    print("[make_run_id] i am called here in run_registry.py, cancels dir {CANCEL_DIR}")
     logger.info(
         "[make_run_id] i am called here in run_registry.py, cancels dir {CANCEL_DIR}"
     )
@@ -69,9 +64,6 @@ def make_run_id(chain_name: str) -> str:
 
 def _make_run_filename(run_id: str) -> str:
     # safe filename: exec_summ-1732523456123.json
-    print(
-        "[_make_run_filename] i am called here in run_registry.py, cancels dir {CANCEL_DIR}"
-    )
     logger.info(
         "[_make_run_filename] i am called here in run_registry.py, cancels dir {CANCEL_DIR}"
     )
@@ -99,9 +91,6 @@ def record_chain_run(
       - <chain_dir>/last_run.json
       - <chain_dir>/runs/<run_id>.json
     """
-    print(
-        "[record_chain_run] i am called here in run_registry.py, cancels dir {CANCEL_DIR}"
-    )
     logger.info(
         "[record_chain_run] i am called here in run_registry.py, cancels dir {CANCEL_DIR}"
     )
@@ -211,9 +200,6 @@ def list_chain_runs(chain_dir: Path, limit: int = 50) -> List[Dict[str, Any]]:
     """
     List recent runs for a chain (up to `limit`).
     """
-    print(
-        "[list_chain_runs] i am called here in run_registry.py, cancels dir {CANCEL_DIR}"
-    )
     logger.info(
         "[list_chain_runs] i am called here in run_registry.py, cancels dir {CANCEL_DIR}"
     )
@@ -251,9 +237,6 @@ def get_chain_run(chain_dir: Path, run_id: str) -> Optional[Dict[str, Any]]:
     """
     Fetch a single run by run_id (linear scan, bounded by MAX_RUNS_PER_CHAIN).
     """
-    print(
-        "[get_chain_run] i am called here in run_registry.py, cancels dir {CANCEL_DIR}"
-    )
     logger.info(
         "[get_chain_run] i am called here in run_registry.py, cancels dir {CANCEL_DIR}"
     )
@@ -278,9 +261,6 @@ def update_run_partial(
     Load an existing run record and update fields, then write.
     Returns updated dict or None if file missing.
     """
-    print(
-        "[update_run_partial] i am called here in run_registry.py, cancels dir {CANCEL_DIR}"
-    )
     runs_dir = chain_dir / "runs"
     run_file = runs_dir / _make_run_filename(run_id)
     if not run_file.exists():
@@ -308,5 +288,4 @@ def update_run_partial(
     return data
 
 
-print("i am called here in  end of run_registry.py, cancels dir {CANCEL_DIR}")
 logger.info("i am called here in  end of run_registry.py, cancels dir {CANCEL_DIR}")

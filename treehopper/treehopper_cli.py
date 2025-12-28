@@ -1168,23 +1168,23 @@ def view_db_cmd(args_list: list[str]) -> None:
         description="Inspect Treehopper database", add_help=False
     )
     parser.add_argument("--show-tables", action="store_true")
-    parser.add_argument("--all", action="store_true")  # New flag
+    parser.add_argument("--all", action="store_true")
     parser.add_argument("--table", type=str)
     parser.add_argument("--limit", type=int, default=20)
     parser.add_argument("--search", "-s", type=str)
+    parser.add_argument("--plain", action="store_true")
+    parser.add_argument("--json", action="store_true")  # Added this
 
     try:
         args = parser.parse_args(args_list)
-
-        # Override limit to 100 if --all is used and user hasn't specified a limit
-        final_limit = 100 if args.all and "--limit" not in args_list else args.limit
-
         run_view_db(
             show_tables=args.show_tables,
             table=args.table,
-            limit=final_limit,
+            limit=args.limit,
             search=args.search,
             show_all=args.all,
+            as_tables=not args.plain and not args.json,
+            as_json=args.json,
         )
     except Exception as e:
         logger.error(f"❌ Error: {e}")

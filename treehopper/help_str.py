@@ -41,9 +41,15 @@ Treehopper CLI Commands
   DB Related CLI Commands
   ==========================
   [treehopper | th] view db --show-tables                 List all database tables and row counts
+  [treehopper | th] view db --show-tables --json          List tables and counts in JSON format
+  [treehopper | th] view db --show-tables --plain         List tables in a clean key-value list (no boxes)
+
   [treehopper | th] view db --table <name>                View content of a specific table
+  [treehopper | th] view db --table <name> --plain        View table in a clean key-value list (no boxes)
+  [treehopper | th] view db --table <name> --json         Valid JSON array of agent records
   [treehopper | th] view db --table <name> --limit <n>    View table with custom row limit
   [treehopper | th] view db --table <name> -s <query>     Search for a string across all columns in a table
+
   [treehopper | th] view db --all                         Full inspection (latest 100 records for all tables)
   [treehopper | th] view db --all --limit <number>        Dumps the last 10 records of every table.
 
