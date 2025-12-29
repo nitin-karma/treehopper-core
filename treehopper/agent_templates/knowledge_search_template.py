@@ -34,7 +34,10 @@ description: Search knowledge base for relevant articles
 inputs:
   - name: query
     type: string
-    description: Search query text
+    description: Search query text (optional)
+  - name: emails
+    type: array
+    description: Optional email objects to derive query from
   - name: top_k
     type: integer
     description: Number of results to return
@@ -45,15 +48,13 @@ inputs:
     type: string
     description: Knowledge base name
 outputs:
-  - name: articles
+  - name: knowledge_articles
     type: array
     description: Matching knowledge articles
   - name: count
     type: integer
-    description: Number of results found
   - name: best_match_score
     type: number
-    description: Highest relevance score
 tags:
   - search
   - knowledge
@@ -64,13 +65,15 @@ version: '1.0'
 # ============================================================================
 # HANDLER.PY
 # ============================================================================
-HANDLER_CODE = """import asyncio
+HANDLER_CODE = """from pathlib import Path
+import json
+import asyncio
 from fastapi import Body
 from typing import Optional, List, Dict, Any
 
 from treehopper.treehopper import agent, get_agent_id
 from treehopper.agent_base import TreehopperAgentBase
-
+from treehopper.th_config import TH_ROOT
 from .schema import KnowledgeSearchRequest, KnowledgeSearchResponse, KnowledgeArticle
 
 agent_name = "{agent_name}"
@@ -84,53 +87,79 @@ class KnowledgeSearchAgent(TreehopperAgentBase):
         super().__init__()
         self.knowledge_bases = self._load_knowledge_bases()
 
-    def _load_knowledge_bases(self) -> Dict[str, List[Dict]]:
-        '''Load knowledge bases (sample data for demo)'''
+    def _load_knowledge_bases(self) -> Dict[str, List[Dict[str, Any]]]:
+        '''
+        Primary: Load knowledge from Postgres (if configured)
+        Secondary: Fallback to local synthetic_data/kb.json
+        '''
 
-        return {{
-            "default": [
-                {{
-                    "id": "kb001",
-                    "title": "How to Reset Your Password",
-                    "content": "To reset your password: 1) Go to login page 2) Click 'Forgot Password' 3) Enter your email 4) Check your inbox for reset link 5) Click link and set new password",
-                    "category": "account",
-                    "tags": ["password", "reset", "login", "account"],
-                    "url": "https://help.example.com/reset-password"
-                }},
-                {{
-                    "id": "kb002",
-                    "title": "Refund Policy",
-                    "content": "Our refund policy: Full refunds within 30 days of purchase. Items must be unused and in original packaging. Digital products are non-refundable after download. Contact support@example.com to initiate refund.",
-                    "category": "billing",
-                    "tags": ["refund", "return", "money-back", "billing"],
-                    "url": "https://help.example.com/refund-policy"
-                }},
-                {{
-                    "id": "kb003",
-                    "title": "Troubleshooting Login Issues",
-                    "content": "Can't log in? Try: 1) Clear browser cache 2) Try incognito mode 3) Disable extensions 4) Check Caps Lock 5) Reset password 6) Contact support",
-                    "category": "technical",
-                    "tags": ["login", "troubleshooting", "access", "technical"],
-                    "url": "https://help.example.com/login-issues"
-                }},
-                {{
-                    "id": "kb004",
-                    "title": "How to Cancel Subscription",
-                    "content": "To cancel: 1) Log in 2) Go to Settings > Billing 3) Click 'Manage Subscription' 4) Select 'Cancel' 5) Confirm. You'll retain access until end of billing period.",
-                    "category": "billing",
-                    "tags": ["cancel", "subscription", "billing"],
-                    "url": "https://help.example.com/cancel"
-                }},
-                {{
-                    "id": "kb005",
-                    "title": "Shipping Information",
-                    "content": "Standard (5-7 days) free over $50. Express (2-3 days) $15. International (10-14 days) varies. Track orders in your account.",
-                    "category": "shipping",
-                    "tags": ["shipping", "delivery", "tracking"],
-                    "url": "https://help.example.com/shipping"
-                }}
-            ]
-        }}
+        import os
+        import json
+        from pathlib import Path
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.exc import SQLAlchemyError
+
+        # ---------- 1. CHECK IF DB IS CONFIGURED ----------
+        try:
+            db_user = os.getenv("DB_USER", None)
+            db_password = os.getenv("DB_PASSWORD", None)
+            db_name = os.getenv("DB_NAME", None)
+
+            if db_user and db_password and db_name:
+                db_host = os.getenv("DB_HOST", "localhost")
+                db_port = os.getenv("DB_PORT", "5432")
+
+                db_url = f"postgresql://{{db_user}}:{{db_password}}@{{db_host}}:{{db_port}}/{{db_name}}"
+
+
+                engine = create_engine(
+                    db_url,
+                    connect_args={{"connect_timeout": 2}},
+                    pool_pre_ping=True
+                )
+
+                with engine.connect() as conn:
+                    result = conn.execute(text(\"\"\"
+                        SELECT id, title, content, category, tags, url
+                        FROM knowledge_articles
+                    \"\"\"))
+
+                    articles = []
+                    for row in result:
+                        item = dict(row._mapping)
+
+                        # Normalize tags
+                        if isinstance(item.get("tags"), str):
+                            item["tags"] = [t.strip() for t in item["tags"].split(",")]
+
+                        articles.append(item)
+
+                    print(f"[knowledge_search] ✅ Loaded {{len(articles)}} articles from Postgres")
+                    return {{"default": articles}}
+
+        except (SQLAlchemyError, Exception) as e:
+            print(f"[knowledge_search] ⚠️ Postgres unavailable, falling back to JSON: {{e}}")
+
+        # ---------- 2. FALLBACK TO LOCAL JSON ----------
+        try:
+            #agent_dir = Path(__file__).resolve().parent
+            #kb_path = agent_dir.parent / "synthetic_data" / "kb.json"
+            kb_path = TH_ROOT / "registry" / "shared" / agent_id / "files" / "kb.json"
+
+            if not kb_path.exists():
+                print(f"[knowledge_search] ❌ No KB found at {{kb_path}}")
+                return {{"default": []}}
+
+            with kb_path.open("r", encoding="utf-8") as f:
+                kb_data = json.load(f)
+
+            print(f"[knowledge_search] 📦 Loaded KB from {{kb_path}}")
+            return {{"default": kb_data}} if isinstance(kb_data, list) else kb_data
+
+        except Exception as e:
+            print(f"[knowledge_search] ❌ Critical KB load failure: {{e}}")
+            return {{"default": []}}
+
 
     def _calculate_relevance(self, query: str, article: Dict) -> float:
         '''Calculate relevance score (keyword matching)'''
@@ -161,8 +190,23 @@ class KnowledgeSearchAgent(TreehopperAgentBase):
         await self.check_cancel()
 
         try:
-            kb_name = request.knowledge_base
-            kb_articles = self.knowledge_bases.get(kb_name, [])
+            # -------------------------------
+            # Resolve inputs SAFELY
+            # -------------------------------
+            query = request.query
+            if not query and request.emails:
+                first = request.emails[0]
+                query = first.get("body") if isinstance(first, dict) else getattr(first, "body", "")
+
+
+            if not query or not query.strip():
+                query = "general support request"
+
+            top_k = request.top_k or 5
+            min_relevance = request.min_relevance or 0.3
+
+            knowledge_base = request.knowledge_base or "default"
+            kb_articles = self.knowledge_bases.get(knowledge_base, [])
 
             if not kb_articles:
                 return KnowledgeSearchResponse(
@@ -170,7 +214,7 @@ class KnowledgeSearchAgent(TreehopperAgentBase):
                     count=0,
                     best_match_score=0.0,
                     success=False,
-                    error=f"Knowledge base '{{kb_name}}' not found"
+                    error=f"Knowledge base '{{knowledge_base}}' not found"
                 )
 
             scored_articles = []
@@ -178,23 +222,20 @@ class KnowledgeSearchAgent(TreehopperAgentBase):
             for article in kb_articles:
                 await self.cancelable_sleep(0.01)
 
-                relevance = self._calculate_relevance(request.query, article)
+                relevance = self._calculate_relevance(query, article)
 
-                if relevance >= request.min_relevance:
+                if relevance >= min_relevance:
                     scored_articles.append({{
                         **article,
                         "relevance_score": relevance
                     }})
 
             scored_articles.sort(key=lambda x: x["relevance_score"], reverse=True)
-            top_articles = scored_articles[:request.top_k]
+            top_articles = scored_articles[:top_k]
 
             result_articles = []
             for article in top_articles:
-                content = article["content"]
-                if not request.include_content:
-                    content = content[:200] + "..." if len(content) > 200 else content
-
+                content = article.get("content", "")
                 result_articles.append(KnowledgeArticle(
                     id=article["id"],
                     title=article["title"],
@@ -208,7 +249,7 @@ class KnowledgeSearchAgent(TreehopperAgentBase):
             best_score = top_articles[0]["relevance_score"] if top_articles else 0.0
 
             return KnowledgeSearchResponse(
-                articles=result_articles,
+                knowledge_articles=result_articles,
                 count=len(result_articles),
                 best_match_score=best_score,
                 success=True
@@ -216,7 +257,7 @@ class KnowledgeSearchAgent(TreehopperAgentBase):
 
         except Exception as e:
             return KnowledgeSearchResponse(
-                articles=[],
+                knowledge_articles=[],
                 count=0,
                 best_match_score=0.0,
                 success=False,
@@ -236,7 +277,7 @@ async def handle(payload: KnowledgeSearchRequest = Body(...)):
 # SCHEMA.PY
 # ============================================================================
 SCHEMA_CODE = """from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 
 class KnowledgeArticle(BaseModel):
@@ -251,19 +292,18 @@ class KnowledgeArticle(BaseModel):
 
 
 class KnowledgeSearchRequest(BaseModel):
-    '''Input schema for knowledge search'''
-    query: str = Field(..., description="Search query", min_length=1)
-    top_k: int = Field(5, description="Number of results", ge=1, le=50)
-    min_relevance: float = Field(0.3, description="Min relevance threshold", ge=0, le=1)
-    knowledge_base: str = Field("default", description="Knowledge base name")
-    include_content: bool = Field(True, description="Include full article content")
+    emails: Optional[List[Dict]] = None
+    query: Optional[str] = None
+    top_k: Optional[int] = None
+    min_relevance: Optional[float] = None
+    knowledge_base: Optional[str] = None
 
 
 class KnowledgeSearchResponse(BaseModel):
-    '''Output schema for knowledge search'''
-    articles: List[KnowledgeArticle] = Field(default_factory=list)
-    count: int = Field(0)
-    best_match_score: float = Field(0.0)
-    success: bool = Field(True)
+    knowledge_articles: List[KnowledgeArticle] = Field(default_factory=list)
+    count: int = 0
+    best_match_score: float = 0.0
+    success: bool = True
     error: Optional[str] = None
+
 """

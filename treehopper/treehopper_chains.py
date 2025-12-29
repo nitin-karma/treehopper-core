@@ -564,7 +564,7 @@ def chain_run_detached(
     ensure_main_server()
 
     cfg = load_chain_cfg(chain_ref)
-    print(f"chain config : {cfg}")
+    logger.info(f"chain config : {cfg}")
 
     pid_file = RUNTIME_DIR / f"{CHAIN_PID_PREFIX}{chain_ref.chain_id}.pid"
 
@@ -1701,8 +1701,92 @@ How it works:
                 fail(f"Agent '{name}' does not exist")
 
 
+# def validate_input_resolution(cfg):
+#     available_outputs: set[str] = set()
+
+#     steps = cfg["steps"]
+
+#     for idx, step in enumerate(steps):
+#         step_outputs = set()
+
+#         for agent in step["agents"]:
+#             spec = load_agent_spec(agent["agent_name"])
+
+#             for inp in spec["inputs"]:
+#                 if inp.get("required", True) is False:
+#                     continue
+#                 name = inp["name"]
+#                 source = inp.get("source")
+#                 logger.info(f"Source - {source}")
+
+#                 # ✅ FIRST STEP: allow request inputs
+#                 if idx == 0:
+#                     # Only allow request-bound inputs
+#                     if inp.get("source") == "request":
+#                         continue
+
+#                     # Implicit request input is allowed ONLY if explicitly declared
+#                     if inp.get("source") is None:
+#                         continue
+#                     fail(
+#                         f"""
+# Unresolved input detected
+
+# Step: {step['step_id']}
+# Agent: {agent['agent_name']}
+# Missing input: {name}
+
+# Why this happened:
+# • First step inputs must come from request
+# • This input is neither request-bound nor produced earlier
+
+# Suggested fix:
+# Add source: request
+# """
+#                     )
+
+#                 if not is_input_resolvable(inp, agent, available_outputs):
+#                     fail(
+#                         f"""
+# Unresolved input detected
+
+# Step: {step['step_id']}
+# Agent: {agent['agent_name']}
+# Missing input: {name}
+
+# Why this happened:
+# • This step does not receive data from previous steps
+# • Parallel steps cannot read sibling outputs
+# • Input not found in request payload
+
+# Suggested fix:
+# Add a producer step before '{step['step_id']}'
+# """
+#                     )
+
+#             # Register outputs AFTER validation
+#             for out in spec["outputs"]:
+#                 step_outputs.add(out["name"])
+
+#         available_outputs |= step_outputs
+
+
 def validate_input_resolution(cfg):
-    available_outputs: set[str] = set()
+    # START WITH REQUEST FIELDS
+    available_outputs: set[str] = set(
+        [
+            "text",
+            "query",
+            "message",
+            "customer_message",
+            "emails",
+            "data",
+            "metadata",
+            "context",
+            "content",
+            "body",
+        ]
+    )
 
     steps = cfg["steps"]
 
@@ -1715,56 +1799,22 @@ def validate_input_resolution(cfg):
             for inp in spec["inputs"]:
                 if inp.get("required", True) is False:
                     continue
+
                 name = inp["name"]
                 source = inp.get("source")
-                logger.info(f"Source - {source}")
 
-                # ✅ FIRST STEP: allow request inputs
-                if idx == 0:
-                    # Only allow request-bound inputs
-                    if inp.get("source") == "request":
-                        continue
+                # Allow source=None or source="request"
+                if source in (None, "request"):
+                    available_outputs.add(name)  # Track for downstream
+                    continue
 
-                    # Implicit request input is allowed ONLY if explicitly declared
-                    if inp.get("source") is None:
-                        continue
-                    fail(
-                        f"""
-Unresolved input detected
-
-Step: {step['step_id']}
-Agent: {agent['agent_name']}
-Missing input: {name}
-
-Why this happened:
-• First step inputs must come from request
-• This input is neither request-bound nor produced earlier
-
-Suggested fix:
-Add source: request
-"""
-                    )
-
+                # Validate explicit sources
                 if not is_input_resolvable(inp, agent, available_outputs):
                     fail(
-                        f"""
-Unresolved input detected
-
-Step: {step['step_id']}
-Agent: {agent['agent_name']}
-Missing input: {name}
-
-Why this happened:
-• This step does not receive data from previous steps
-• Parallel steps cannot read sibling outputs
-• Input not found in request payload
-
-Suggested fix:
-Add a producer step before '{step['step_id']}'
-"""
+                        f"Unresolved input: {step['step_id']}.{agent['agent_name']}.{name}"
                     )
 
-            # Register outputs AFTER validation
+            # Register outputs
             for out in spec["outputs"]:
                 step_outputs.add(out["name"])
 

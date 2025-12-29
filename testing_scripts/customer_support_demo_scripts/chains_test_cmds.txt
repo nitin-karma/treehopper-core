@@ -1,0 +1,190 @@
+# ============================================================================
+# Chain Test Commands (UPDATED WITH ENRICHER)
+# ============================================================================
+# All chains now include context_enricher for data normalization
+# Test payloads simplified - enricher handles transformation
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Test Chain 1 (Basic Auto-Reply + Enricher)
+# ----------------------------------------------------------------------------
+
+cd support_basic
+
+th chain start basic_support --bg --port 20100
+
+# Test with direct text input (enricher will normalize)
+th chain run basic_support \
+  --payload '{"text":"How do I reset my password?"}' \
+  --detached --port 20100
+
+# OR test with email-like structure
+th chain run basic_support \
+  --payload '{"emails":[{"body":"I forgot my password","sender_email":"user@example.com"}]}' \
+  --detached --port 20100
+
+th chain stop basic_support
+
+
+# ----------------------------------------------------------------------------
+# Test Chain 2 (Smart Routing + Enricher)
+# ----------------------------------------------------------------------------
+
+cd support_routing
+
+th chain start smart_routing --bg --port 20200
+
+# Test bug report routing
+th chain run smart_routing \
+  --payload '{"text":"CRITICAL: Production database down!"}' \
+  --detached --port 20200
+
+# Test normal query
+th chain run smart_routing \
+  --payload '{"text":"How do I update my profile?"}' \
+  --detached --port 20200
+
+th chain stop smart_routing
+
+
+# ----------------------------------------------------------------------------
+# Test Chain 3 (Parallel Intelligence + Enricher)
+# ----------------------------------------------------------------------------
+
+cd support_parallel
+
+th chain start parallel_intel --bg --port 20300
+
+# Test urgent query (parallel urgency + search)
+th chain run parallel_intel \
+  --payload '{"text":"URGENT: Need immediate help with account access!"}' \
+  --detached --port 20300
+
+# Test normal query
+th chain run parallel_intel \
+  --payload '{"text":"Can you help me understand the pricing?"}' \
+  --detached --port 20300
+
+th chain stop parallel_intel
+
+
+# ----------------------------------------------------------------------------
+# Test Chain 4 (Conditional Escalation + Enricher)
+# ----------------------------------------------------------------------------
+
+cd support_escalation
+
+th chain start escalation_flow --bg --port 20400
+
+# Test critical escalation path
+th chain run escalation_flow \
+  --payload '{"text":"CRITICAL BUG: System returning errors!"}' \
+  --detached --port 20400
+
+# Test auto-respond path
+th chain run escalation_flow \
+  --payload '{"text":"Where can I find documentation?"}' \
+  --detached --port 20400
+
+th chain stop escalation_flow
+
+
+# ----------------------------------------------------------------------------
+# Test Chain 5 (Multi-Channel + Enricher)
+# ----------------------------------------------------------------------------
+
+cd support_omnichannel
+
+th chain start omnichannel --bg --port 20500
+
+# Test with recipient info (enricher will extract)
+th chain run omnichannel \
+  --payload '{"text":"Need assistance","metadata":{"from":"customer@example.com"}}' \
+  --detached --port 20500
+
+# Test simple text
+th chain run omnichannel \
+  --payload '{"text":"Help with billing"}' \
+  --detached --port 20500
+
+th chain stop omnichannel
+
+
+# ----------------------------------------------------------------------------
+# Test Chain 6 (Production Pipeline + Enricher)
+# ----------------------------------------------------------------------------
+
+cd support_production
+
+th chain start production_support --bg --port 20600
+
+# Test critical production issue
+th chain run production_support \
+  --payload '{"text":"URGENT: Cannot login, production impact!"}' \
+  --detached --port 20600
+
+# Test general support
+th chain run production_support \
+  --payload '{"text":"I have a question about features"}' \
+  --detached --port 20600
+
+th chain stop production_support
+
+
+# ============================================================================
+# ENRICHER STANDALONE TEST
+# ============================================================================
+# Test enricher agent independently to verify transformation
+# ============================================================================
+
+# Test text input
+th call enricher --payload '{"text":"Test message for support"}'
+
+# Expected output:
+# {
+#   "customer_message": "Test message for support",
+#   "query": "Test message for support",
+#   "recipient": "default_user",
+#   "session_context": {},
+#   "success": true
+# }
+
+# Test email array input
+th call enricher --payload '{
+  "emails": [
+    {
+      "body": "I need help with password reset",
+      "sender_email": "user@example.com",
+      "subject": "Password Help"
+    }
+  ]
+}'
+
+# Expected output:
+# {
+#   "customer_message": "I need help with password reset",
+#   "query": "I need help with password reset",
+#   "recipient": "user@example.com",
+#   "session_context": {"subject": "Password Help"},
+#   "success": true
+# }
+
+
+# ============================================================================
+# DEBUG COMMANDS
+# ============================================================================
+
+# View chain structure
+th chain vu basic_support
+
+# Check enricher is built
+ls ~/.treehopper/registry/agents/ | grep enricher
+
+# View chain runs
+cat ~/.treehopper/registry/chains/basic_support/runs/*.json | jq '.'
+
+# Check agent outputs
+th chain logs basic_support
+
+# View enricher logs specifically
+grep -r "enricher" ~/.treehopper/logs/

@@ -110,6 +110,7 @@ rsa==4.9.1
 shellingham==1.5.4
 six==1.17.0
 sniffio==1.3.1
+SQLAlchemy==2.0.45
 starlette==0.38.6
 sympy==1.14.0
 tabulate==0.9.0
@@ -118,7 +119,7 @@ tiktoken==0.12.0
 tokenizers==0.22.1
 tomli==2.3.0
 tqdm==4.67.1
--e git+https://github.com/nitin-karma/treehopper-core.git@0a5a77b526e707cb52611cf86ef6cf2a987411ac#egg=treehopperai_core
+-e git+https://github.com/nitin-karma/treehopper-core.git@d085bad4b7e1e7987d617b7920a5e5a2c66d4585#egg=treehopperai_core
 typer==0.21.0
 typer-slim==0.21.0
 typing-inspection==0.4.2

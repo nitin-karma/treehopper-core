@@ -47,3 +47,10 @@ synthetic_response.json
 summary_1h.json
 summary_24h.json
 summary_7d.json
+synthetic_data/*
+support_basic
+support_routing
+support_parallel
+support_escalation
+support_omnichannel
+support_production
