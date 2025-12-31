@@ -17,38 +17,53 @@ cd support_escalation
 
 # Create agents
 echo "📦 Creating agents..."
-th agent create classifier --from-template intent_classifier
-th agent create urgency --from-template urgency_detector
-th agent create router --from-template simple_router
-th agent create enricher --from-template context_enricher
-th agent create searcher --from-template knowledge_search
-th agent create responder --from-template llm_responder
-th agent create alerter --from-template alert_manager
+th agent create classifier_c4 --from-template intent_classifier
+th agent create urgency_c4 --from-template urgency_detector
+th agent create router_c4 --from-template simple_router
+th agent create analysis_c4 --from-template analysis_bridge
+th agent create enricher_c4 --from-template context_enricher
+th agent create searcher_c4 --from-template knowledge_search
+th agent create responder_c4 --from-template llm_responder
+th agent create alerter_c4 --from-template alert_manager
 
 # Build agents ONE BY ONE
 echo "🔨 Building agents..."
-th agent build classifier
-th agent build urgency
-th agent build router
-th agent build enricher
-th agent build searcher
-th agent build responder
-th agent build alerter
+th agent build classifier_c4
+th agent build urgency_c4
+th agent build router_c4
+th agent build analysis_c4
+th agent build enricher_c4
+th agent build searcher_c4
+th agent build responder_c4
+th agent build alerter_c4
+
+th restart
+sleep 2
+
+th push-file searcher_c4 ../synthetic_data/kb.json
+th push-file searcher_c4 ../synthetic_data/support_tickets.json
+th push-file searcher_c4 ../synthetic_data/test_scenarios.json
 
 # Build chain with routing logic + enricher
 echo "⛓️  Building chain with escalation routing..."
+
 th chain build-steps escalation_flow \
-  --step classify sequential classifier \
-  --step detect sequential urgency \
-  --step route sequential router \
+  --step classify sequential classifier_c4 \
+  --step detect sequential urgency_c4 \
+  --step analysis sequential analysis_c4 \
+  --step route sequential router_c4 \
     --route-on '[
       {"if":"output.route==\"escalate\"","goto":"alert"},
-      {"if":"output.urgency==\"critical\"","goto":"alert"}
+      {"if":"state.analysis.urgency==\"critical\"","goto":"alert"}
     ]' \
-  --step enrich sequential enricher \
-  --step search sequential searcher \
-  --step respond sequential responder \
-  --step alert sequential alerter
+  --step enrich sequential enricher_c4 \
+  --step search sequential searcher_c4 \
+  --step respond sequential responder_c4 \
+  --step alert sequential alerter_c4
+
+
+
+
 
 echo ""
 echo "✅ Chain 4 built: escalation_flow"

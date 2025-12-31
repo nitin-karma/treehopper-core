@@ -103,6 +103,11 @@
            // Hide loader after tab switch
            setTimeout(hideLoader, 300);
        }
+       if (tabName === 'chains') {
+            if (typeof initChainsTab === 'function') {
+                initChainsTab();
+            }
+        }
 
        // Save active tab to localStorage
        localStorage.setItem('activeTab', tabName);

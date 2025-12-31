@@ -1262,7 +1262,58 @@ def print_chain_help() -> None:
 Treehopper Chain Commands
 ───────────────────────────────────────────────────────────────────────────────
   [treehopper | th] chain build <name> <agent1> <agent2> ...
-      Create a new chain. Installs ~/.treehopper/registry/chains/<chain_id>.
+
+  [treehopper | th] chain validate build-steps <chain_name> [STEPS...]
+   -- helps to validate the chain build steps safe before actual build
+   EXAMPLE -
+        th chain validate build-steps escalation_flow \\
+        --step classify sequential classifier_c4 \\
+        --step detect sequential urgency_c4 \\
+        --step analysis sequential analysis_c4 \\
+        --step route sequential router_c4 \\
+        --route-on '[
+                {"if":"output.route==\"escalate\"","goto":"alert"},
+                {"if":"state.analysis.urgency==\"critical\"","goto":"alert"}
+                ]' \\
+        --step enrich sequential enricher_c4 \\
+        --step search sequential searcher_c4 \\
+        --step respond sequential responder_c4 \\
+        --step alert sequential alerter_c4
+
+  [treehopper | th] chain build-steps <name> [STEPS...]
+    -- creates the actual chain, better to valdiate before build-steps
+    ARGUMENTS
+    <name>             The unique identifier for the new chain.
+
+    STEPS
+        --step <name> <type> <agents...>
+            Define a execution step.
+            <type>: sequential | parallel | route
+
+    OPTIONS
+    --merge-agent <agent>
+        Required for 'parallel' steps. Specifies the agent used to consolidate
+        multiple outputs before moving to the next step.
+
+    --route-on '<json>'
+        Required for 'route' steps. A JSON array defining conditional
+        logic and jump targets.
+        Example: '[{"if": "condition", "goto": "step_name"}]'
+
+    EXAMPLE -
+        th chain build-steps escalation_flow \\
+        --step classify sequential classifier_c4 \\
+        --step detect sequential urgency_c4 \\
+        --step analysis sequential analysis_c4 \\
+        --step route sequential router_c4 \\
+        --route-on '[
+                {"if":"output.route==\"escalate\"","goto":"alert"},
+                {"if":"state.analysis.urgency==\"critical\"","goto":"alert"}
+                ]' \\
+        --step enrich sequential enricher_c4 \\
+        --step search sequential searcher_c4 \\
+        --step respond sequential responder_c4 \\
+        --step alert sequential alerter_c4
 
   [treehopper | th] chain run <name|id>
       [--payload '{...}'] [--payload-file file.json]
@@ -1771,26 +1822,80 @@ How it works:
 #         available_outputs |= step_outputs
 
 
+# def validate_input_resolution(cfg):
+#     # START WITH REQUEST FIELDS
+#     available_outputs: set[str] = set(
+#         [
+#             "text",
+#             "query",
+#             "message",
+#             "customer_message",
+#             "emails",
+#             "data",
+#             "metadata",
+#             "context",
+#             "content",
+#             "body",
+#         ]
+#     )
+
+#     steps = cfg["steps"]
+#     print(f"[validate_input_resolution] Steps : {steps}")
+
+#     for idx, step in enumerate(steps):
+#         step_outputs = set()
+
+#         for agent in step["agents"]:
+#             spec = load_agent_spec(agent["agent_name"])
+
+#             for inp in spec["inputs"]:
+#                 if inp.get("required", True) is False:
+#                     continue
+
+#                 name = inp["name"]
+#                 source = inp.get("source")
+
+#                 # Allow source=None or source="request"
+#                 if source in (None, "request"):
+#                     available_outputs.add(name)  # Track for downstream
+#                     continue
+
+#                 # Validate explicit sources
+#                 if not is_input_resolvable(inp, agent, available_outputs):
+#                     fail(
+#                         f"Unresolved input: {step['step_id']}.{agent['agent_name']}.{name}"
+#                     )
+
+#             # Register outputs
+#             for out in spec["outputs"]:
+#                 step_outputs.add(out["name"])
+
+#         available_outputs |= step_outputs
+
+
 def validate_input_resolution(cfg):
-    # START WITH REQUEST FIELDS
-    available_outputs: set[str] = set(
-        [
-            "text",
-            "query",
-            "message",
-            "customer_message",
-            "emails",
-            "data",
-            "metadata",
-            "context",
-            "content",
-            "body",
-        ]
-    )
+    # START WITH REQUEST FIELDS (legacy behavior)
+    available_outputs: set[str] = {
+        "text",
+        "query",
+        "message",
+        "customer_message",
+        "emails",
+        "data",
+        "metadata",
+        "context",
+        "content",
+        "body",
+    }
 
     steps = cfg["steps"]
+    print(f"[validate_input_resolution] Steps : {steps}")
+
+    # Track step outputs by step_id (NEW, non-breaking)
+    step_output_index: dict[str, set[str]] = {}
 
     for idx, step in enumerate(steps):
+        step_id = step["step_id"]
         step_outputs = set()
 
         for agent in step["agents"]:
@@ -1803,21 +1908,58 @@ def validate_input_resolution(cfg):
                 name = inp["name"]
                 source = inp.get("source")
 
-                # Allow source=None or source="request"
+                # -------------------------------------------------
+                # 1️⃣ Legacy behavior (no source or request)
+                # -------------------------------------------------
                 if source in (None, "request"):
-                    available_outputs.add(name)  # Track for downstream
+                    available_outputs.add(name)
                     continue
 
-                # Validate explicit sources
+                # -------------------------------------------------
+                # 2️⃣ Explicit source handling (NEW)
+                # -------------------------------------------------
+                if source.startswith("state."):
+                    parts = source.split(".")
+
+                    if len(parts) != 3:
+                        fail(
+                            f"Invalid source format '{source}' "
+                            f"for {step_id}.{agent['agent_name']}.{name}"
+                        )
+
+                    _, source_step, source_field = parts
+
+                    if source_step not in step_output_index:
+                        fail(
+                            f"Input source '{source}' references step "
+                            f"'{source_step}' which is not available yet"
+                        )
+
+                    if source_field not in step_output_index[source_step]:
+                        fail(
+                            f"Input source '{source}' references missing output "
+                            f"'{source_field}' in step '{source_step}'"
+                        )
+
+                    print(
+                        f"[input-resolution] "
+                        f"{step_id}.{agent['agent_name']}.{name} ← {source}"
+                    )
+                    continue
+
+                # -------------------------------------------------
+                # 3️⃣ Legacy implicit resolution (unchanged)
+                # -------------------------------------------------
                 if not is_input_resolvable(inp, agent, available_outputs):
                     fail(
-                        f"Unresolved input: {step['step_id']}.{agent['agent_name']}.{name}"
+                        f"Unresolved input: " f"{step_id}.{agent['agent_name']}.{name}"
                     )
 
-            # Register outputs
+            # Register outputs for this step
             for out in spec["outputs"]:
                 step_outputs.add(out["name"])
 
+        step_output_index[step_id] = step_outputs
         available_outputs |= step_outputs
 
 
@@ -1913,6 +2055,7 @@ def chain_entry(argv: List[str]) -> None:
         "sweep-resume",
         "build-parallel",
         "build-steps",
+        "validate",
     }:
 
         if sub == "help":
@@ -2270,6 +2413,32 @@ def chain_entry(argv: List[str]) -> None:
             show_json = "--json" in argv
             chain_flow_viewer(chain_name, raw_yaml=show_raw, raw_json=show_json)
             return
+
+        if sub == "validate":
+            explain = "--explain" in argv
+            argv = [a for a in argv if a != "--explain"]
+
+            if len(argv) < 3:
+                print("Usage:")
+                print("  th chain validate [--explain] build-steps <chain_name> ...")
+                return
+
+            mode = argv[1]
+
+            if mode == "build-steps":
+                chain_name = argv[2]
+                args = argv[3:]
+                from treehopper.chain_validator import (
+                    validate_chain_cfg_explain,
+                    validate_build_steps,
+                )
+
+                if explain:
+                    validate_chain_cfg_explain(chain_name, args)
+                else:
+                    validate_build_steps(chain_name, args)
+                    # print("✅ Chain validation passed")
+                return
 
     # fall back → legacy mode
     simple_chain_run(argv)

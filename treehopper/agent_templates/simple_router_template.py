@@ -27,16 +27,16 @@ description: Route based on intent and urgency
 inputs:
   - name: intent
     type: string
-    description: Classified intent
-    source: request
+    source: state.classify.intent
+
   - name: urgency
     type: string
-    description: Urgency level
-    source: request
+    source: state.analyze.urgency
+
   - name: confidence
     type: number
-    description: Classification confidence
-    source: request
+    source: state.analyze.confidence
+
 outputs:
   - name: route
     type: string
@@ -65,64 +65,38 @@ agent_id = get_agent_id(agent_name)
 class SimpleRouterAgent(TreehopperAgentBase):
     '''Simple routing logic'''
 
-    ESCALATE_INTENTS = {"bug_report", "complaint", "refund_request"}
+    ESCALATE_INTENTS = {{"bug_report", "complaint", "refund_request"}}
 
     async def run(self, request: SimpleRouterRequest) -> SimpleRouterResponse:
         await self.check_cancel()
 
-        try:
-            intent = request.intent
-            urgency = request.urgency
-            confidence = request.confidence
+        intent = request.intent
+        urgency = request.urgency
+        confidence = request.confidence
 
-            # Rule 1: Critical urgency always escalates
-            if urgency == "critical":
-                return SimpleRouterResponse(
-                    route="escalate",
-                    reasoning="Critical urgency requires immediate human attention"
-                )
-
-            # Rule 2: Low confidence escalates
-            if confidence < 0.6:
-                return SimpleRouterResponse(
-                    route="escalate",
-                    reasoning=f"Low confidence ({confidence:.2f}) - needs human review"
-                )
-
-            # Rule 3: Bug reports + high urgency escalate
-            if intent == "bug_report" and urgency in ["high", "critical"]:
-                return SimpleRouterResponse(
-                    route="escalate",
-                    reasoning="High-priority bug requires engineering attention"
-                )
-
-            # Rule 4: Complaints escalate
-            if intent == "complaint":
-                return SimpleRouterResponse(
-                    route="escalate",
-                    reasoning="Customer complaints handled by support team"
-                )
-
-            # Rule 5: Refunds escalate
-            if intent == "refund_request":
-                return SimpleRouterResponse(
-                    route="escalate",
-                    reasoning="Refund requests require approval"
-                )
-
-            # Default: Auto-respond
-            return SimpleRouterResponse(
-                route="auto_respond",
-                reasoning="Straightforward query can be auto-handled"
-            )
-
-        except Exception as e:
+        if urgency == "critical":
             return SimpleRouterResponse(
                 route="escalate",
-                reasoning=f"Error in routing: {str(e)}",
-                success=False,
-                error=str(e)
+                reasoning="Critical urgency requires immediate human attention"
             )
+
+        if confidence < 0.6:
+            return SimpleRouterResponse(
+                route="escalate",
+                reasoning=f"Low confidence ({{confidence:.2f}}) - needs human review"
+            )
+
+        if intent in self.ESCALATE_INTENTS and urgency in ["high", "critical"]:
+            return SimpleRouterResponse(
+                route="escalate",
+                reasoning="High-risk intent requires escalation"
+            )
+
+        return SimpleRouterResponse(
+            route="auto_respond",
+            reasoning="Straightforward query can be auto-handled"
+        )
+
 
 
 @agent("{agent_name}", method="POST", goal="Route message to appropriate handler")

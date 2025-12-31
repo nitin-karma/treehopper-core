@@ -20,44 +20,52 @@ cd support_production
 
 # Create all agents
 echo "📦 Creating agents..."
-th agent create classifier --from-template intent_classifier
-th agent create urgency --from-template urgency_detector
-th agent create sentiment --from-template sentiment_analyzer
-th agent create router --from-template simple_router
-th agent create enricher --from-template context_enricher
-th agent create searcher --from-template knowledge_search
-th agent create responder --from-template llm_responder
-th agent create alerter --from-template alert_manager
-th agent create sender --from-template response_sender
+th agent create classifier_c6 --from-template intent_classifier
+th agent create urgency_c6 --from-template urgency_detector
+th agent create sentiment_c6 --from-template sentiment_analyzer
+th agent create router_c6 --from-template simple_router
+th agent create enricher_c6 --from-template context_enricher
+th agent create searcher_c6 --from-template knowledge_search
+th agent create responder_c6 --from-template llm_responder
+th agent create alerter_c6 --from-template alert_manager
+th agent create sender_c6 --from-template response_sender
 
 # Build agents ONE BY ONE
 echo "🔨 Building agents..."
-th agent build classifier
-th agent build urgency
-th agent build sentiment
-th agent build router
-th agent build enricher
-th agent build searcher
-th agent build responder
-th agent build alerter
-th agent build sender
+th agent build classifier_c6
+th agent build urgency_c6
+th agent build sentiment_c6
+th agent build router_c6
+th agent build enricher_c6
+th agent build searcher_c6
+th agent build responder_c6
+th agent build alerter_c6
+th agent build sender_c6
+
+th restart
+sleep 2
+
+th push-file searcher_c6 ../synthetic_data/kb.json
+th push-file searcher_c6 ../synthetic_data/support_tickets.json
+th push-file searcher_c6 ../synthetic_data/test_scenarios.json
 
 # Build complete production chain with enricher
 echo "⛓️  Building production chain..."
 th chain build-steps production_support \
-  --step classify sequential classifier \
-  --step analyze parallel urgency sentiment \
+  --step classify sequential classifier_c6 \
+  --step analyze parallel urgency_c6 sentiment_c6 \
     --merge-agent smart_data_aggregator \
-  --step route sequential router \
+  --step route sequential router_c6 \
     --route-on '[
       {"if":"output.route==\"escalate\"","goto":"escalate"},
-      {"if":"output.urgency==\"critical\"","goto":"escalate"}
+      {"if":"output.route==\"auto_respond\"","goto":"enrich"}
     ]' \
-  --step enrich sequential enricher \
-  --step search sequential searcher \
-  --step respond sequential responder \
-  --step escalate sequential alerter \
-  --step send sequential sender
+  --step enrich sequential enricher_c6 \
+  --step search sequential searcher_c6 \
+  --step respond sequential responder_c6 \
+  --step send sequential sender_c6 \
+  --step escalate sequential alerter_c6
+
 
 echo ""
 echo "✅ Chain 6 built: production_support"

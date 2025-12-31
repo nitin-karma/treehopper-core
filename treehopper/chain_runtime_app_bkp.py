@@ -41,9 +41,7 @@ from treehopper.treehopper_cancellation import (
     is_run_cancelled,
 )
 from treehopper.websockets.ws_manager import ws_manager
-from treehopper.logging import get_logger
 
-logger = get_logger()
 # ======================================================================
 # EXECUTION AND CONFIGURATION START
 # All imports are now complete.
@@ -132,44 +130,16 @@ def builtin_language_detect(text: Optional[str]) -> Dict[str, Any]:
 def builtin_merge_parallel(parallel_results: list) -> Dict[str, Any]:
     """
     Generic fan-in merge.
-    Deterministic, backward compatible, router-safe.
-
-    Enhancements:
-    - Collects and normalizes confidence
-    - Guarantees required routing fields
-    - Preserves last-write-wins semantics
-    - Keeps existing _meta enrichment intact
+    Deterministic, last-write-wins.
     """
     merged: Dict[str, Any] = {}
-    confidences = []
 
     for item in parallel_results:
         output = item.get("output", {})
-        if not isinstance(output, dict):
-            continue
+        if isinstance(output, dict):
+            merged.update(output)
 
-        # 🔹 Collect confidence safely (NEW, non-breaking)
-        conf = output.get("confidence")
-        if isinstance(conf, (int, float)):
-            confidences.append(conf)
-
-        # 🔹 Preserve original behavior (last-write-wins)
-        merged.update(output)
-
-    # 🔹 Normalize confidence (ONLY if missing or invalid)
-    if "confidence" not in merged or not isinstance(
-        merged.get("confidence"), (int, float)
-    ):
-        if confidences:
-            merged["confidence"] = round(sum(confidences) / len(confidences), 3)
-        else:
-            merged["confidence"] = 0.5  # safe default
-
-    # 🔹 Guarantee router-safe fields (non-breaking defaults)
-    merged.setdefault("urgency", "medium")
-    merged.setdefault("sentiment", "neutral")
-
-    # 🔹 Preserve existing enrichment logic
+    # Optional enrichment
     text = merged.get("extracted_text") or merged.get("text")
     if text:
         merged["_meta"] = builtin_language_detect(text)
@@ -351,99 +321,33 @@ async def health():
 # ======================================================================
 
 
-# def resolve_input(
-#     source: Optional[str],
-#     state: Dict[str, Dict[str, Any]],
-#     root_payload: Dict[str, Any],
-#     fallback_key: Optional[str] = None,
-# ):
-#     """
-#     Resolution order:
-#     1. Explicit source: step.agent.field
-#     2. Implicit: previous step's agent output by key
-#     3. Request payload fallback
-#     """
-#     print(
-#         f"[resolve_input] source={source}, key={fallback_key}, "
-#         f"state_keys={list(state.keys())}, "
-#     )
-#     # 🔑 CRITICAL FIX: structural state injection
-#     if fallback_key == "state" and source in (None, "state"):
-#         print("[resolve_input] Injecting full runtime state")
-#         logger.info("[resolve_input] Injecting full runtime state")
-#         return state
-
-#     # 1️⃣ Explicit mapping
-#     if source:
-#         if source == "request":
-#             # request means entire request payload OR direct key
-#             if fallback_key and fallback_key in root_payload:
-#                 return root_payload[fallback_key]
-#             return root_payload
-#         try:
-#             step, agent, field = source.split(".", 2)
-#             return state.get(step, {}).get(agent, {}).get(field)
-#         except Exception:
-#             return None
-
-#     # 2️⃣ IMPLICIT SEQUENTIAL MAPPING
-#     if state and fallback_key:
-#         step_ids = list(state.keys())
-#         if len(step_ids) >= 2:
-#             prev_step_id = step_ids[-2]
-#             for agent_output in state.get(prev_step_id, {}).values():
-#                 if isinstance(agent_output, dict) and fallback_key in agent_output:
-#                     return agent_output[fallback_key]
-
-#     # 3️⃣ Request payload fallback
-#     if fallback_key:
-#         return root_payload.get(fallback_key)
-#     return None
-
-
 def resolve_input(
     source: Optional[str],
     state: Dict[str, Dict[str, Any]],
     root_payload: Dict[str, Any],
     fallback_key: Optional[str] = None,
 ):
+    """
+    Resolution order:
+    1. Explicit source: step.agent.field
+    2. Implicit: previous step's agent output by key
+    3. Request payload fallback
+    """
     print(
         f"[resolve_input] source={source}, key={fallback_key}, "
         f"state_keys={list(state.keys())}, "
     )
-    logger.info(
-        f"[resolve_input] source={source}, key={fallback_key}, "
-        f"state_keys={list(state.keys())}, "
-    )
-
-    # 🟢 SPECIAL CASE: runtime state injection
-    if fallback_key == "state" and source is None:
-        print("[resolve_input] Injecting full runtime state")
-        logger.info("[resolve_input] Injecting full runtime state")
-        return state
-
     # 1️⃣ Explicit mapping
     if source:
         if source == "request":
+            # request means entire request payload OR direct key
             if fallback_key and fallback_key in root_payload:
                 return root_payload[fallback_key]
             return root_payload
         try:
-            _, step_id, field = source.split(".", 2)
-
-            step_data = state.get(step_id, {})
-            if not isinstance(step_data, dict):
-                return None
-
-            # 🔑 Agent-agnostic lookup
-            for agent_output in step_data.values():
-                if isinstance(agent_output, dict) and field in agent_output:
-                    return agent_output[field]
-
-            return None
-        except Exception as e:
-            print(f"[resolve_input] Error: {e}")
-            logger.error(f"[resolve_input] Error: {e}")
+            step, agent, field = source.split(".", 2)
+            return state.get(step, {}).get(agent, {}).get(field)
+        except Exception:
             return None
 
     # 2️⃣ IMPLICIT SEQUENTIAL MAPPING
@@ -457,10 +361,7 @@ def resolve_input(
 
     # 3️⃣ Request payload fallback
     if fallback_key:
-        print(f"[resolve_input] Fallback_key: {fallback_key}")
-        logger.info(f"[resolve_input] Fallback_key: {fallback_key}")
         return root_payload.get(fallback_key)
-
     return None
 
 

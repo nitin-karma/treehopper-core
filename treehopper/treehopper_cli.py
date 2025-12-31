@@ -59,6 +59,7 @@ from treehopper.visualizer.inspect_db import (
 
 from treehopper.visualizer.log_tail import run_view_logs
 from treehopper.visualizer.system_view import show_root_tree, show_pids
+from treehopper.template_cli import template_entry
 
 # ==============================================================================
 # GLOBAL OVERRIDE FOR DEVELOPMENT
@@ -1580,6 +1581,10 @@ def main() -> None:
             show_pids()
         else:
             print(f"Unknown show target: {target}")
+
+    elif cmd == "template":
+        logger.info("template command")
+        template_entry(sys.argv[2:])
 
     else:
         logger.info(f"Unknown command: {cmd}")

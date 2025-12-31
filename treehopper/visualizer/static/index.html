@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="loader.css">
   <!-- Storage Inspector -->
   <link rel="stylesheet" href="storage-inspector.css">
-
+  <link rel="stylesheet" href="chains-tab.css">
   <!-- D3.js and Graphviz libraries -->
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@hpcc-js/wasm@2.20.0/dist/graphviz.umd.js"></script>
@@ -97,6 +97,11 @@
       <button class="tab-btn" onclick="switchTab('analytics')" data-tab="analytics">
         <span class="tab-icon">📊</span>
         <span class="tab-label">Analytics</span>
+      </button>
+      <!-- ✅ ADD THIS: Chains Tab Button -->
+      <button class="tab-btn" onclick="switchTab('chains')" data-tab="chains">
+        <span class="tab-icon">⛓️</span>
+        <span class="tab-label">Chains</span>
       </button>
       <button class="tab-btn" onclick="switchTab('logs')" data-tab="logs">
         <span class="tab-icon">📋</span>
@@ -378,6 +383,169 @@
         </div>
       </div>
 
+       <!-- ✅ TAB: Chains Testing (NEW) -->
+        <div id="tab-chains" class="tab-content">
+           <div class="chains-container">
+            <!-- Header -->
+            <div class="chains-header">
+              <div class="header-left">
+                <h2 class="section-title">⛓️ Chain Testing</h2>
+                <p class="section-subtitle">Test and monitor your agent chains</p>
+              </div>
+              <div class="header-right">
+                <button class="btn-secondary" onclick="refreshChainsList()">
+                  <span>🔄</span>
+                  <span>Refresh</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Chain Selection -->
+            <div class="chain-selector-card">
+              <div class="card-header">
+                <h3 class="card-title">Select Chain</h3>
+              </div>
+              <div class="card-body">
+                <div class="form-group">
+                  <label for="chainSelect" class="form-label">Available Chains</label>
+                  <select id="chainSelect" class="form-select" onchange="loadChainDetails()">
+                    <option value="">-- Select a chain --</option>
+                  </select>
+                </div>
+
+                <!-- Chain Info (Hidden until selected) -->
+                <div id="chainInfo" class="chain-info" style="display: none;">
+                  <div class="info-grid">
+                    <div class="info-item">
+                      <span class="info-label">Chain ID:</span>
+                      <span class="info-value" id="chainId">-</span>
+                    </div>
+                    <div class="info-item">
+                      <span class="info-label">Steps:</span>
+                      <span class="info-value" id="chainSteps">-</span>
+                    </div>
+                    <div class="info-item">
+                      <span class="info-label">Status:</span>
+                      <span class="status-badge" id="chainStatus">Unknown</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Test Configuration -->
+            <div class="test-config-card" id="testConfigCard" style="display: none;">
+              <div class="card-header">
+                <h3 class="card-title">Test Configuration</h3>
+              </div>
+              <div class="card-body">
+                <!-- Payload Input -->
+                <div class="form-group">
+                  <div class="label-with-action">
+                    <label for="testPayload" class="form-label">Request Payload (JSON)</label>
+                    <button class="btn-text" onclick="loadSamplePayload()">Load Sample</button>
+                  </div>
+                  <textarea
+                    id="testPayload"
+                    class="form-textarea"
+                    rows="8"
+                    placeholder='{"text": "How do I reset my password?"}'
+                  ></textarea>
+                </div>
+
+                <!-- Test Mode -->
+                <div class="form-group">
+                  <label class="form-label">Execution Mode</label>
+                  <div class="radio-group">
+                    <label class="radio-label">
+                      <input type="radio" name="executionMode" value="sync" checked>
+                      <span>Synchronous</span>
+                      <small>Wait for completion</small>
+                    </label>
+                    <label class="radio-label">
+                      <input type="radio" name="executionMode" value="async">
+                      <span>Asynchronous</span>
+                      <small>Run in background</small>
+                    </label>
+                  </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="button-group">
+                  <button class="btn-primary" onclick="runChainTest()" id="runTestBtn">
+                    <span>▶️</span>
+                    <span>Run Test</span>
+                  </button>
+                  <button class="btn-secondary" onclick="clearTestForm()">
+                    <span>🗑️</span>
+                    <span>Clear</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Test Results -->
+            <div class="test-results-card" id="testResultsCard" style="display: none;">
+              <div class="card-header">
+                <div class="header-with-actions">
+                  <h3 class="card-title">Test Results - </h3>
+                  <div class="result-actions">
+                    <span class="result-timestamp" id="resultTimestamp"></span>
+                    <button class="btn-icon" onclick="downloadResults()" title="Download Results">
+                      💾
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="card-body">
+                <!-- Run ID -->
+                <div class="result-header">
+                  <span class="result-label">Run ID:</span>
+                  <code class="result-run-id" id="resultRunId">-</code>
+                </div>
+
+                <!-- Status -->
+                <div class="result-status" id="resultStatus">
+                  <div class="status-indicator">
+                    <span class="status-icon" id="statusIcon">⏳</span>
+                    <span class="status-text" id="statusText">Running...</span>
+                  </div>
+                </div>
+
+                <!-- Step Results -->
+                <div class="steps-container" id="stepsContainer">
+                  <!-- Steps will be dynamically added here -->
+                </div>
+
+                <!-- Raw Response -->
+                <div class="result-raw">
+                  <div class="collapsible-header" onclick="toggleRawResponse()">
+                    <span>📄 Raw Response</span>
+                    <span class="collapse-icon" id="rawResponseIcon">▼</span>
+                  </div>
+                  <pre class="result-code" id="rawResponse" style="display: none;"></pre>
+                </div>
+              </div>
+            </div>
+
+            <!-- Recent Tests -->
+            <div class="recent-tests-card">
+              <div class="card-header">
+                <h3 class="card-title">Recent Tests</h3>
+              </div>
+              <div class="card-body">
+                <div class="tests-list" id="recentTestsList">
+                  <div class="empty-state">
+                    <span class="empty-icon">📋</span>
+                    <p>No recent tests</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+           </div>
+        </div>
+
+
     </div>
   </div>
 
@@ -505,5 +673,6 @@
 
   <!-- Storage Inspector Script -->
   <script src="storage-inspector.js"></script>
+  <script src="chains-tab.js"></script>
 </body>
 </html>

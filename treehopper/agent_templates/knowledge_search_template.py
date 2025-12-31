@@ -43,6 +43,7 @@ inputs:
     description: Number of results to return
   - name: min_relevance
     type: number
+    default: 0.4
     description: Minimum relevance threshold (0-1)
   - name: knowledge_base
     type: string

@@ -32,7 +32,6 @@ inputs:
   - name: provider
     type: string
     description: LLM provider
-    source: request
 outputs:
   - name: urgency
     type: string
@@ -53,13 +52,13 @@ tags:
 version: '1.0'
 """
 
-HANDLER_CODE = """import asyncio
-from fastapi import Body
-from typing import Dict, Any
+HANDLER_CODE = """from fastapi import Body
+import json
 
 from treehopper.treehopper import agent, get_agent_id
 from treehopper.agent_base import TreehopperAgentBase
 from treehopper.treehopper_llm import call_llm
+
 
 from .schema import UrgencyDetectorRequest, UrgencyDetectorResponse
 
@@ -68,8 +67,6 @@ agent_id = get_agent_id(agent_name)
 
 
 class UrgencyDetectorAgent(TreehopperAgentBase):
-    '''Urgency detection using LLM + keywords'''
-
     CRITICAL_KEYWORDS = [
         "emergency", "critical", "urgent", "asap", "immediately",
         "broken", "down", "not working", "production", "revenue",
@@ -81,103 +78,100 @@ class UrgencyDetectorAgent(TreehopperAgentBase):
         "issue", "error", "failed", "can't", "unable"
     ]
 
-    def _keyword_score(self, text: str) -> tuple:
-        text_lower = text.lower()
+    def _keyword_score(self, text):
+        t = text.lower()
+        critical = sum(1 for k in self.CRITICAL_KEYWORDS if k in t)
+        high = sum(1 for k in self.HIGH_KEYWORDS if k in t)
 
-        critical_matches = sum(1 for kw in self.CRITICAL_KEYWORDS if kw in text_lower)
-        high_matches = sum(1 for kw in self.HIGH_KEYWORDS if kw in text_lower)
-
-        if critical_matches >= 2:
+        if critical >= 2:
             return "critical", 0.9
-        elif critical_matches == 1:
+        if critical == 1:
             return "high", 0.8
-        elif high_matches >= 2:
+        if high >= 2:
             return "high", 0.7
-        elif high_matches == 1:
+        if high == 1:
             return "medium", 0.6
-        else:
-            return "low", 0.5
+        return "low", 0.5
 
-    async def run(self, request: UrgencyDetectorRequest) -> UrgencyDetectorResponse:
+    async def run(self, request: UrgencyDetectorRequest):
         await self.check_cancel()
 
-        try:
-            # Quick keyword scan
-            keyword_urgency, keyword_conf = self._keyword_score(request.text)
+        text = request.text
+        provider = request.provider or "openai"
 
-            # LLM analysis for nuance
-            prompt = f'''Analyze urgency (low/medium/high/critical):
+        kw_urgency, kw_conf = self._keyword_score(text)
 
-Message: {request.text}
+        prompt = (
+            "Analyze urgency (low/medium/high/critical).\\n\\n"
+            "Message:\\n"
+            + text
+            + "\\n\\nReturn ONLY JSON:\\n"
+            + '{{ "urgency": "low|medium|high|critical", '
+            + '"confidence": 0.0, '
+            + '"reasoning": "brief explanation", '
+            + '"requires_immediate_action": true }}'
+        )
 
-Consider:
-- Customer emotion (calm vs frustrated vs angry)
-- Business impact (minor inconvenience vs revenue loss)
-- Time sensitivity (can wait vs needs immediate action)
-- Safety/security concerns
+        llm_result = await call_llm(
+            prompt=prompt,
+            provider=provider,
+            timeout=10,
+            max_retries=2
+        )
 
-Respond with JSON:
-{{
-  "urgency": "low|medium|high|critical",
-  "confidence": 0.0-1.0,
-  "reasoning": "brief explanation",
-  "requires_immediate_action": true|false
-}}
-'''
-
-            await self.check_cancel()
-
-            llm_result = await call_llm(
-                prompt=prompt,
-                provider=request.provider,
-                max_retries=2,
-                timeout=10.0
-            )
-
-            if "error" in llm_result:
-                # Fallback to keyword scoring
-                return UrgencyDetectorResponse(
-                    urgency=keyword_urgency,
-                    confidence=keyword_conf,
-                    reasoning="LLM unavailable, using keyword analysis",
-                    requires_immediate_action=(keyword_urgency in ["critical", "high"]),
-                    success=True
-                )
-
-            # Parse LLM response
-            import json
-            message = llm_result.get("message", "").strip()
-            if message.startswith("```"):
-                lines = message.split("\\n")
-                message = "\\n".join([l for l in lines if not l.strip().startswith("```")])
-
-            result = json.loads(message)
-
+        if "error" in llm_result:
             return UrgencyDetectorResponse(
-                urgency=result.get("urgency", "medium"),
-                confidence=float(result.get("confidence", 0.5)),
-                reasoning=result.get("reasoning", ""),
-                requires_immediate_action=result.get("requires_immediate_action", False),
+                urgency=kw_urgency,
+                confidence=kw_conf,
+                reasoning="Keyword-based fallback",
+                requires_immediate_action=(kw_urgency in ["high", "critical"]),
                 success=True
             )
 
-        except Exception as e:
+        raw = llm_result.get("message")
+
+        if not raw or not isinstance(raw, str):
+            # Fallback to keyword analysis
             return UrgencyDetectorResponse(
-                urgency="medium",
-                confidence=0.3,
-                reasoning=f"Error: {str(e)}",
-                requires_immediate_action=False,
-                success=False,
-                error=str(e)
+                urgency=kw_urgency,
+                confidence=kw_conf,
+                reasoning="Empty LLM response, keyword fallback",
+                requires_immediate_action=(kw_urgency in ["high", "critical"]),
+                success=True
             )
+        raw = raw.strip()
+        # Remove markdown fences if present
+        if raw.startswith("```"):
+            raw = "\\n".join(
+                line for line in raw.splitlines()
+                if not line.strip().startswith("```")
+            ).strip()
+
+        try:
+            data = json.loads(raw)
+        except Exception:
+            return UrgencyDetectorResponse(
+                urgency=kw_urgency,
+                confidence=kw_conf,
+                reasoning="Invalid JSON from LLM, keyword fallback",
+                requires_immediate_action=(kw_urgency in ["high", "critical"]),
+                success=True
+            )
+        return UrgencyDetectorResponse(
+            urgency=data.get("urgency", kw_urgency),
+            confidence=float(data.get("confidence", kw_conf)),
+            reasoning=data.get("reasoning", ""),
+            requires_immediate_action=data.get("requires_immediate_action", False),
+            success=True
+        )
 
 
-@agent("{agent_name}", method="POST", goal="Detect message urgency level")
+@agent("{agent_name}", method="POST", goal="Detect urgency level")
 async def handle(payload: UrgencyDetectorRequest = Body(...)):
-    agent_instance = UrgencyDetectorAgent()
-    result = await agent_instance.run(payload)
-    return result.dict()
+    agent = UrgencyDetectorAgent()
+    return (await agent.run(payload)).dict()
 """
+
 
 SCHEMA_CODE = """from pydantic import BaseModel, Field
 from typing import Optional
@@ -186,7 +180,7 @@ from typing import Optional
 class UrgencyDetectorRequest(BaseModel):
     '''Input schema for urgency detector'''
     text: str = Field(..., description="Message text", min_length=1)
-    provider: str = Field("openai", description="LLM provider")
+    provider: Optional[str] = Field(None, description="LLM provider")
 
 
 class UrgencyDetectorResponse(BaseModel):

@@ -17,31 +17,39 @@ cd support_omnichannel
 
 # Create agents
 echo "📦 Creating agents..."
-th agent create classifier --from-template intent_classifier
-th agent create enricher --from-template context_enricher
-th agent create urgency --from-template urgency_detector
-th agent create searcher --from-template knowledge_search
-th agent create responder --from-template llm_responder
-th agent create sender --from-template response_sender
+th agent create classifier_c5 --from-template intent_classifier
+th agent create enricher_c5 --from-template context_enricher
+th agent create urgency_c5 --from-template urgency_detector
+th agent create searcher_c5 --from-template knowledge_search
+th agent create responder_c5 --from-template llm_responder
+th agent create sender_c5 --from-template response_sender
 
 # Build agents ONE BY ONE
 echo "🔨 Building agents..."
-th agent build classifier
-th agent build enricher
-th agent build urgency
-th agent build searcher
-th agent build responder
-th agent build sender
+th agent build classifier_c5
+th agent build enricher_c5
+th agent build urgency_c5
+th agent build searcher_c5
+th agent build responder_c5
+th agent build sender_c5
+
+th restart
+sleep 2
+
+th push-file searcher_c5 ../synthetic_data/kb.json
+th push-file searcher_c5 ../synthetic_data/support_tickets.json
+th push-file searcher_c5 ../synthetic_data/test_scenarios.json
+
 
 # Build chain with parallel processing + enricher
 echo "⛓️  Building omnichannel chain..."
 th chain build-steps omnichannel \
-  --step classify sequential classifier \
-  --step enrich sequential enricher \
-  --step analyze parallel urgency searcher \
+  --step classify sequential classifier_c5 \
+  --step enrich sequential enricher_c5 \
+  --step analyze parallel urgency_c5 searcher_c5 \
     --merge-agent smart_data_aggregator \
-  --step respond sequential responder \
-  --step send sequential sender
+  --step respond sequential responder_c5 \
+  --step send sequential sender_c5
 
 echo ""
 echo "✅ Chain 5 built: omnichannel"

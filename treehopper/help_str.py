@@ -65,6 +65,14 @@ Treehopper CLI Commands
   [treehopper | th] view logs --level <LVL>               Filter logs by level (INFO, ERROR, DEBUG)
   [treehopper | th] view logs --all                       Dump all historical logs from the log directory
 
+  Template Related CLI Commands
+  =============================
+  [treehopper | th] template lint <template_name>         Check template is correctly structured
+  [treehopper | th] template deploy <template_name>       Deploy will add your unique template or overwrite existing to folder treehopper/agent_templates
+  [treehopper | th] template view <template_name>         View your template
+  [treehopper | th] template list                         List all templates
+  [treehopper | th] template delete <template_name>       [!Be Careful] Hard Delete template
+
   [! BE CAREFUL] Maintainance CLI Commands
   =========================================
   [treehopper | th] admin snapshot-db        Snapshot analytics DB
