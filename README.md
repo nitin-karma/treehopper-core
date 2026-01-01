@@ -18,7 +18,23 @@
 
 ## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> What Is TreehopperAI?
 
-**TreehopperAI** is an execution-detached runtime platform for agentic workflows that run reliably across edge, cloud, and on-prem environments — with native cancellation, resume, and observability..
+**TreehopperAI** is a **personal learning project** exploring an execution-detached,
+local-first runtime for agentic workflows that run reliably across edge, cloud, and on-prem environments — with native cancellation, resume, and observability.
+
+It is designed to study how agent orchestration systems behave when:
+- execution is detached from request lifecycles
+- runtimes are long-lived and cancellable
+- workflows must remain deterministic and observable
+
+> ⚠️ **Project Disclaimer**
+>
+> TreehopperAI is a personal, open-source learning project built outside of work hours.
+> It is **not affiliated with any employer**, does not use proprietary code or data,
+> and is **not positioned as a commercial product**.
+>
+> The primary goal is to explore system design, orchestration patterns,
+> runtime behavior, and developer experience for AI agents in a transparent way.
+
 
 ### 🧭 What “Local-First” Means in TreehopperAI
 
@@ -48,7 +64,7 @@ th whatis
             Think Globally. Compute Locally. Execute Intelligently.
 
 
-TreehopperAI is a local-first, agentic workflow engine for building
+TreehopperAI is a local-first, agentic workflow runtime for building
 and executing intelligent chains of AI agents.
 
 Core Concepts
@@ -65,18 +81,27 @@ Replay    → Late joiner visibility
 
 ## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Why This Project Matters
 
-AI automation is rapidly becoming the backbone of modern software — yet the tooling around it remains fragmented, heavyweight, and increasingly centralized. Existing orchestrators either force developers into closed ecosystems, or bury simple ideas under layers of infrastructure complexity. Treehopper takes a different path. It brings AI orchestration back to where it belongs: *close to the developer*.
+This project exists as a **technical exploration**, not as a finished product.
 
-It brings together:
+AI automation is rapidly becoming a core building block of modern systems, yet
+much of the tooling around it is heavyweight, centralized, or opaque.
+TreehopperAI explores a different direction — one where orchestration remains
+**local, inspectable, and developer-owned**.
+
+It brings together ideas such as:
 
 - ✔ Agent micro-apps
-- ✔ Chain orchestration
-- ✔ Multi-provider LLM calls
-- ✔ Semantic memory
+- ✔ Chain-based orchestration
+- ✔ Multi-provider LLM abstraction
+- ✔ Semantic memory experiments
 - ✔ Parallel execution
-- ✔ Cancellation
+- ✔ Cooperative cancellation
 - ✔ Edge-friendly deployment
-- ✔ Portable FastAPI runtimes
+- ✔ CLI-first workflows
+
+The goal is not to replace existing platforms, but to **understand the trade-offs**
+behind them by building a minimal, transparent alternative.
+
 
 ### <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Core Principles
 
@@ -121,27 +146,192 @@ TreehopperAI is designed for:
 If you are tired of heavyweight orchestrators and want full control —
 TreehopperAI is for you.
 
-## Real-World Example Chains (Included)
+## Production-Inspired Example: Customer Support Automation
 
-Treehopper ships with realistic, production-inspired examples:
+TreehopperAI currently includes **one fully implemented, end-to-end reference chain**
+that demonstrates how real-world agent orchestration works in practice.
 
-- **Manufacturing RCA Chain**
-  - Image defect analysis
-  - Equipment logs
-  - Root cause identification
-  - Automated dispatch
+This example is intentionally complete, realistic, and runnable locally.
 
-- **Finance Fraud Detection**
-  - Risk scoring
-  - Behavioral analysis
-  - Composite decision routing
+### 🧩 Customer Support Production Pipeline
 
-- **Bioinformatics Pipelines**
-  - Data validation
-  - Risk assessment
-  - Report aggregation
+A **9-step production-style workflow** with a fully working, production-style customer support pipeline that demonstrates how real companies can orchestrate intelligent workflows locally, reliably, and transparently.
 
-These examples are runnable locally and serve as reference architectures.
+#### What this chain demonstrates
+
+- Sequential + parallel execution in a single workflow
+- Deterministic fan-in using a merge agent
+- Conditional routing based on runtime outputs
+- Data normalization via an enrichment bridge
+- Long-running, cancellable execution
+- Clean input/output resolution across steps
+
+#### High-level flow
+
+1. **Intent Classification**
+   - Extracts intent, confidence, urgency, sentiment
+
+2. **Parallel Analysis**
+   - Urgency detector
+   - Sentiment analyzer
+
+3. **Smart Aggregation**
+   - Deterministic merge of parallel outputs
+
+4. **Routing Decision**
+   - Determines `auto_respond` vs `escalate`
+
+5. **Context Enrichment (Bridge Pattern)**
+   - Normalizes and prepares inputs for downstream agents
+
+6. **Knowledge Search**
+   - Retrieves relevant articles from local knowledge base
+
+7. **LLM Response Generation**
+   - Crafts a response using retrieved context
+
+8. **Escalation Handling**
+   - Triggers alerts for critical cases
+
+9. **Multi-channel Delivery**
+   - Sends response via configured channel
+
+```
+export OPENAI_API_KEY=<your_key>
+
+To test the customer support chain -
+./testing_scripts/customer_support_demo_scripts/chain6_prod_pipeline.sh
+
+th show pids
+
+th chain vu production_support
+```
+## <img src="treehopper/static/customer_supp_chain.png" alt="Treehopper Logo" width="400">
+
+```
+th chain start production_support --bg --port 20600
+
+th chain run production_support --payload '{"text":"URGENT: Cannot login!"}' --detached --port 20600
+
+cat .../chains/<chain_id>/runs/<run_id>.json
+
+```
+
+#### Why this example matters
+
+This chain validates TreehopperAI’s core design goals:
+
+- ✔ Local-first execution
+- ✔ Clear separation of concerns
+- ✔ Safe parallelism with deterministic merge
+- ✔ Explicit data flow between agents
+- ✔ Production-style orchestration without external dependencies
+
+> This example serves as a **reference implementation**, not a claim of production readiness.
+
+### Built-in Agent Template Library
+
+TreehopperAI includes a growing set of production-ready agent templates to accelerate real-world use cases.
+
+### Available Templates (Highlights)
+```
+Template CLI --
+
+th template list
+th template view context_enricher
+th template lint chromadb_memory
+th template deploy my_custom_template.py
+th template delete old_template
+
+```
+Category	Templates
+Analysis	analysis_bridge, confidence_gate, quality_evaluator
+Routing	decision_router, fallback_responder
+Context	context_enricher, schema_normalizer, json_transformer
+Memory & State	chromadb_memory, sqlite_state_reader, sqlite_state_writer, ttl_cache
+Reliability	retry_controller
+Output	alert_manager, response_sender
+
+Templates are:
+
+✅ Linted before deployment
+
+✅ Versioned
+
+✅ Format-safe
+
+✅ Designed for backward compatibility
+
+
+### Minimal Dashboard (Local, Optional, Secure)
+
+TreehopperAI includes a minimal, local-only dashboard for observability and testing.
+
+```
+Start it with:
+
+th launch ui
+
+```
+
+### 🔐 Authentication
+
+Default login: admin / admin
+
+Mandatory password change on first login
+
+Local-only user management (no cloud dependency)
+
+### 📊 Dashboard Features
+
+#### Screens Available
+
+#### Overview
+ - Deployed agents
+ - Built chains
+ - Running processes
+ - Live system events
+ ## <img src="treehopper/static/th_overview.png" alt="Treehopper Logo" width="400">
+
+#### Analytics
+- Agent & chain execution metrics
+- Success / failure rates
+- File processing stats
+
+
+#### Chains
+- Test detached chains
+- Run synchronous or background executions
+- Inspect live chain status
+
+
+#### System Logs
+- Filterable application logs
+- Export to CSV
+
+
+#### Users
+- Admin-only user management
+- Role-based access
+
+
+#### Storage Inspector
+- Runtime disk usage
+- Registry size
+- Archive health
+- Database footprint
+
+
+#### 💡 The dashboard is optional — TreehopperAI remains fully CLI-driven and automation-friendly.
+
+---
+
+### 🚧 Future Reference Chains (Planned)
+
+Additional industry-inspired chains (e.g., data pipelines, fraud analysis,
+scientific workflows) are planned, but **not yet implemented**.
+
+The focus remains on correctness, transparency, and learning over breadth.
 
 ## Security & Privacy
 
@@ -168,6 +358,14 @@ LLM providers are opt-in and configurable.
 git clone <repo_url>
 cd treehopper-core
 pip install -e .
+
+# Setup the execution root
+[treehopper / th] setup
+
+# View available commands
+[treehopper / th] whatis
+[treehopper / th] help
+[treehopper / th] chain help
 
 # Start main server
 [treehopper / th] start --bg
@@ -475,7 +673,21 @@ Treehopper is built on the belief that AI automation should be **democratized**.
 
 **Local-first. Open. Portable. Modular. Hackable. Developer-owned.**
 
-If you believe in that future — **welcome to TreehopperAI.**
+This vision reflects a personal belief shaped through learning and experimentation,
+**not a commercial roadmap**.
+
+### 🧪 Why This Matters
+
+#### TreehopperAI proves that:
+- Agent orchestration does not need cloud lock-in
+- Complex AI workflows can be local, observable, and cancellable
+- Developers should own their AI runtime
+
+#### This project is intentionally positioned as:
+
+- 🧠 A learning-driven, local-first orchestration engine
+- 🧪 A realistic experimentation platform
+- 🛠 A foundation for future agent ecosystems
 
 ---
 
