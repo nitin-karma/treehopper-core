@@ -203,14 +203,50 @@ def list_templates() -> None:
             print("No templates directory found")
             return
 
-        templates = sorted(p.name for p in TEMPLATE_DIR.glob("*_template.py"))
-        if not templates:
+        template_files = sorted(TEMPLATE_DIR.glob("*_template.py"))
+        if not template_files:
             print("No templates available")
             return
 
-        print("Available templates:")
-        for t in templates:
-            print(f"  - {t.replace('_template.py','')}")
+        print("\n📦 Available Templates")
+        print("────────────────────────────────────────────────────────")
+
+        for path in template_files:
+            name = path.stem.replace("_template", "")
+
+            try:
+                spec = importlib.util.spec_from_file_location("template_mod", path)
+                if not (spec and spec.loader):
+                    print(f"• {name}")
+                    print("  └─ ⚠️  Invalid template file structure")
+                    continue
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+
+                info = getattr(module, "TEMPLATE_INFO", {})
+
+                t_name = info.get("name", name)
+                version = info.get("version", "unknown")
+                category = info.get("category", "uncategorized")
+                desc = info.get("description", "").strip()
+
+                print(f"• {t_name}")
+                print(f"  ├─ version   : {version}")
+                print(f"  ├─ category  : {category}")
+                if desc:
+                    print(f"  └─ desc      : {desc}")
+                else:
+                    print("  └─ desc      : (no description)")
+                print()
+
+            except Exception as e:
+                # Do NOT fail listing due to one bad template
+                logger.exception(
+                    f"Failed loading template metadata: {path.name}, Error: {e}"
+                )
+                print(f"• {name}")
+                print("  └─ ⚠️  Failed to load TEMPLATE_INFO (see logs)")
+                print()
 
     except Exception as e:
         logger.exception("Template list failed")
