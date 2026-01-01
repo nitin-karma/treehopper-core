@@ -1,6 +1,7 @@
 # treehopper/visualizer/app.py
-# import os
+import os
 import time
+import httpx
 from fastapi import (
     FastAPI,
     HTTPException,
@@ -10,6 +11,7 @@ from fastapi import (
     Response,
     # Header,
     Query,
+    Body,
 )
 from treehopper.sync_to_sqlite import get_subscription
 from fastapi.responses import FileResponse  # , RedirectResponse
@@ -34,6 +36,7 @@ from treehopper.th_config import (
     TH_ROOT,
     LOG_RENDER_LIMIT,
     DASHBOARD_HEADER,
+    DEFAULT_API_KEY,
     # LOG_SCHEDULE,
 )
 
@@ -887,6 +890,432 @@ def get_summary(window: str = Query("24h", regex="^(1h|24h|7d)$")):
 
     # Return data directly (not nested in window key)
     return summary
+
+
+# -------------------------------------------------------------------
+# Chain Execution Endpoints (NEW)
+# -------------------------------------------------------------------
+
+
+def get_chain_steps(chain_name: str):
+    print(chain_name)
+    if not chain_name:
+        return
+    steps = []
+    all_chains = get_all_chains()
+    # print(all_chains)
+    for chain in all_chains:
+        if chain["chain_name"] == chain_name:
+            # print(chain["steps"])
+            steps = chain["steps"]
+            break
+    # print(steps)
+    return steps
+
+
+@app.post("/api/v1/chains/{chain_name}/run")
+async def run_chain(chain_name: str, payload: dict = Body(...)):
+    """
+    Run a chain from the dashboard UI
+
+    This endpoint:
+    1. Gets the chain's runtime info (port, endpoint)
+    2. Forwards the request to the chain runtime
+    3. Returns the execution result
+
+    Args:
+        chain_name: Name of the chain to run
+        payload: Request payload (includes 'detached' flag for async)
+
+    Returns:
+        Chain execution result or error
+
+    Example:
+        POST /api/v1/chains/basic_support/run
+        {
+            "text": "How do I reset my password?",
+            "detached": true
+        }
+    """
+    try:
+        print(f"[run_chain] Recieved paylaod - {payload}")
+        logger.info(f"[run_chain] Recieved paylaod - {payload}")
+        # 1. Get runtime info for the chain
+        runtime_info = get_chain_runtime_info(chain_name)
+
+        if not runtime_info:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Chain runtime not found for '{chain_name}'. "
+                f"Please start the chain first: th chain start {chain_name} --bg --port <PORT>",
+            )
+
+        # 2. Check if chain is actually running
+        if not runtime_info.get("is_running"):
+            raise HTTPException(
+                status_code=503,
+                detail=f"Chain runtime found but not running (PID {runtime_info.get('pid')} is dead). "
+                f"Please restart the chain.",
+            )
+
+        # 3. Build the chain runtime endpoint
+        port = runtime_info["port"]
+        chain_run_url = f"http://localhost:{port}/api/v1/{chain_name}/run"
+
+        logger.info(f"[run_chain] Forwarding request to {chain_run_url}")
+        logger.info(f"[run_chain] Payload: {payload}")
+
+        # 4. Forward request to chain runtime
+        headers = {
+            "x-api-key": DEFAULT_API_KEY,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(chain_run_url, json=payload, headers=headers)
+
+            # 5. Return response from chain runtime
+            if response.status_code == 200:
+                result = response.json()
+                logger.info(f"[run_chain] Success: {result}")
+                return result
+            else:
+                logger.error(f"[run_chain] Chain runtime error: {response.text}")
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Chain runtime error: {response.text}",
+                )
+
+    except httpx.ConnectError:
+        raise HTTPException(
+            status_code=503,
+            detail="Cannot connect to chain runtime. "
+            "Is the chain running on the expected port?",
+        )
+    except httpx.TimeoutException:
+        raise HTTPException(
+            status_code=504, detail="Chain execution timed out after 120 seconds"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[run_chain] Unexpected error: {str(e)}")
+        logger.error(f"[run_chain] Unexpected error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+def get_chain_runtime_info(chain_name_or_id: str) -> dict | None:
+    """
+    Get runtime information for a chain
+
+    Checks ~/.treehopper/runtime/ for PID files and returns runtime info
+
+    Args:
+        chain_name_or_id: Chain name or chain ID
+
+    Returns:
+        Dictionary with runtime info or None
+    """
+    runtime_dir = TH_ROOT / "runtime"
+
+    if not runtime_dir.exists():
+        return None
+
+    # Look for PID file
+    # Format: det_chain_{chain_name}-{chain_id}.pid or det_chain_{chain_id}.pid
+    pid_files = list(runtime_dir.glob(f"det_chain_*{chain_name_or_id}*.pid"))
+
+    if not pid_files:
+        # Try exact match
+        pid_files = list(runtime_dir.glob(f"det_chain_{chain_name_or_id}.pid"))
+
+    if not pid_files:
+        return None
+
+    # Use first match
+    pid_file = pid_files[0]
+
+    try:
+        # Read PID file to get port and PID
+        with open(pid_file, "r") as f:
+            content = f.read().strip()
+
+        # Parse PID file format: "PID:PORT"
+
+        # Parse PID file
+        line = content.split(":")
+        print(f"[get_chain_runtime_info] {line}")
+        logger.info(f"[get_chain_runtime_info] {line}")
+
+        pid = port = 0
+        pid, port = int(line[0]), int(line[1])
+        print(f"[get_chain_runtime_info] {pid}, {port}")
+        logger.info(f"[get_chain_runtime_info] {pid}, {port}")
+
+        if pid == 0 or port == 0:
+            return None
+
+        # Check if process is actually running
+        try:
+            os.kill(pid, 0)  # Signal 0 doesn't kill, just checks existence
+            is_running = True
+        except OSError:
+            is_running = False
+
+        # Extract chain name and ID from filename
+        # Format: det_chain_{chain_name}-{chain_id}.pid
+        filename = pid_file.stem.replace("det_chain_", "")
+
+        if "-" in filename:
+            chain_name, chain_id = filename.rsplit("-", 1)
+        else:
+            chain_name = filename
+            chain_id = filename
+
+        return {
+            "chain_name": chain_name,
+            "chain_id": chain_id,
+            "pid": pid,
+            "port": port,
+            "is_running": is_running,
+            "pid_file": str(pid_file),
+        }
+
+    except Exception as e:
+        logger.error(f"Error reading PID file {pid_file}: {e}")
+        return None
+
+
+@app.get("/api/v1/chains/{chain_name}/runtime")
+async def get_chain_runtime(chain_name: str):
+    """
+    Get runtime information for a chain
+
+    Returns the server URL, port, and endpoints for a running chain
+
+    Args:
+        chain_name: Chain name or chain ID
+
+    Returns:
+        Runtime information including endpoints
+
+    Example:
+        GET /api/v1/chains/basic_support/runtime
+
+        Response:
+        {
+            "success": true,
+            "data": {
+                "chain_name": "basic_support",
+                "chain_id": "basic_support-38716e14",
+                "runtime_status": "running",
+                "runtime_url": "http://localhost:20100",
+                "port": 20100,
+                "pid": 12345,
+                "run_endpoint": "http://localhost:20100/api/v1/basic_support/run",
+                "health_endpoint": "http://localhost:20100/api/v1/basic_support/health",
+                "logs_endpoint": "http://localhost:20100/api/v1/basic_support/logs"
+            }
+        }
+    """
+    try:
+        runtime_status = "Running"
+        runtime_info = get_chain_runtime_info(chain_name)
+
+        if not runtime_info:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Chain runtime not found for: {chain_name}. Is the chain running?",
+            )
+
+        chain_name = runtime_info["chain_name"]
+        chain_id = runtime_info["chain_id"]
+        port = runtime_info["port"]
+        pid = runtime_info["pid"]
+        is_running = runtime_info["is_running"]
+
+        if not is_running:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Chain runtime found but not running (PID {pid} is dead)",
+            )
+
+        # Build runtime URLs
+        base_url = f"http://localhost:{port}"
+        api_base = f"{base_url}/api/v1/{chain_name}"
+        steps = get_chain_steps(chain_name=chain_name)
+        print(f"[get_chain_runtime] chain steps count: {len(steps)}")
+        logger.info(f"[get_chain_runtime] chain steps count: {len(steps)}")
+        return {
+            "success": True,
+            "data": {
+                "chain_name": chain_name,
+                "chain_id": chain_id,
+                "runtime_status": runtime_status,
+                "runtime_url": base_url,
+                "port": port,
+                "pid": pid,
+                "stepCount": len(steps),
+                "run_endpoint": f"{api_base}/run",
+                "health_endpoint": f"{api_base}/health",
+            },
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error getting chain runtime info: {str(e)}"
+        )
+
+
+@app.get("/api/v1/chains/list-running")
+async def list_running_chains():
+    """
+    List all currently running chains
+
+    Returns:
+        List of running chains with their runtime info
+
+    Example:
+        GET /api/v1/chains/list-running
+
+        Response:
+        {
+            "success": true,
+            "count": 2,
+            "chains": [
+                {
+                    "chain_name": "basic_support",
+                    "chain_id": "basic_support-38716e14",
+                    "port": 20100,
+                    "pid": 12345,
+                    "runtime_url": "http://localhost:20100",
+                    "run_endpoint": "http://localhost:20100/api/v1/basic_support/run"
+                }
+            ]
+        }
+    """
+    try:
+        runtime_dir = TH_ROOT / "runtime"
+        print(runtime_dir.exists())
+        if not runtime_dir.exists():
+            return {"success": True, "count": 0, "chains": []}
+
+        running_chains = []
+        runtime_status = "Running"
+        # Find all PID files
+
+        for pid_file in runtime_dir.glob("det_chain_*.pid"):
+            try:
+                # Read PID file
+                with open(pid_file, "r") as f:
+                    content = f.read().strip()
+
+                # Parse PID file
+                line = content.split(":")
+                print(f"[list_running_chains] {line}")
+                logger.info(f"[list_running_chains] {line}")
+                pid = port = 0
+                pid, port = int(line[0]), int(line[1])
+                print(f"[list_running_chains] {pid}, {port}")
+                logger.info(f"[list_running_chains] {pid}, {port}")
+                # Check if running
+
+                try:
+                    os.kill(pid, 0)
+                    is_running = True
+                except OSError:
+                    is_running = False
+
+                if is_running:
+                    runtime_status = "Running"
+                    print(f"[list_running_chains] Is Chain running: {is_running}")
+                    logger.info(f"[list_running_chains] Is Chain running: {is_running}")
+                    # Extract chain info from filename
+                    filename = pid_file.stem.replace("det_chain_", "")
+
+                    print(f"[list_running_chains] PID File: {pid_file}")
+                    logger.info(f"[list_running_chains] PID File: {pid_file}")
+
+                    if "-" in filename:
+                        chain_name, chain_id = filename.rsplit("-", 1)
+                    else:
+                        chain_name = filename
+                        chain_id = filename
+
+                    base_url = f"http://localhost:{port}"
+                    steps = get_chain_steps(chain_name=chain_name)
+                    print(f"[list_running_chains] chain steps count: {len(steps)}")
+                    logger.info(
+                        f"[list_running_chains] chain steps count: {len(steps)}"
+                    )
+                    api_base = f"{base_url}/api/v1/{chain_name}"
+                    chain_cfg = {
+                        "chain_name": chain_name,
+                        "chain_id": chain_id,
+                        "port": port,
+                        "pid": pid,
+                        "stepCount": len(steps),
+                        "runtime_url": base_url,
+                        "run_endpoint": f"{api_base}/run",
+                        "runtime_status": runtime_status,
+                        "health_endpoint": f"{api_base}/health",
+                    }
+                    print(f"[list_running_chains] {chain_cfg}")
+                    logger.info(f"[list_running_chains] {chain_cfg}")
+                    running_chains.append(chain_cfg)
+            except Exception as e:
+                print(f"[list_running_chains] Error processing {pid_file}: {e}")
+                logger.error(f"[list_running_chains] Error processing {pid_file}: {e}")
+                continue
+
+        return {"success": True, "count": len(running_chains), "chains": running_chains}
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error listing running chains: {str(e)}"
+        )
+
+
+@app.get("/api/v1/chains/{chain_name}/status")
+async def get_chain_status(chain_name: str):
+    """
+    Quick status check for a chain
+
+    Returns:
+        Simple status object
+
+    Example:
+        GET /api/v1/chains/basic_support/status
+
+        Response:
+        {
+            "status": "running",
+            "chain_name": "basic_support",
+            "chain_id": "basic_support-38716e14",
+            "port": 20100,
+            "pid": 12345
+        }
+    """
+    try:
+        runtime_info = get_chain_runtime_info(chain_name)
+
+        if not runtime_info:
+            return {"status": "stopped", "message": "Chain runtime not found"}
+
+        is_running = runtime_info["is_running"]
+
+        return {
+            "status": "running" if is_running else "stopped",
+            "chain_name": runtime_info["chain_name"],
+            "chain_id": runtime_info["chain_id"],
+            "port": runtime_info["port"] if is_running else None,
+            "pid": runtime_info["pid"],
+        }
+
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 # -------------------------------------------------------------------
