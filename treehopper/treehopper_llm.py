@@ -90,6 +90,8 @@ async def call_llm(
                 result = await call_perplexity(prompt, api_key, timeout)
             elif provider == "gemini":
                 result = await call_gemini(prompt, api_key, timeout)
+            elif provider == "claude":
+                result = await call_claude(prompt, api_key, timeout)
             else:
                 return {
                     "error": f"Unsupported provider: {provider}",
@@ -222,4 +224,38 @@ async def call_gemini(prompt: str, api_key: str | None, timeout: float):
         return {
             "message": data["candidates"][0]["content"]["parts"][0]["text"],
             "tokens": data.get("usageMetadata", {}).get("totalTokenCount", 0),
+        }
+
+
+async def call_claude(prompt: str, api_key: str | None, timeout: float):
+    """
+    Call Anthropic's Claude API
+    Docs: https://docs.anthropic.com/en/api/messages
+    """
+    headers = {
+        "x-api-key": api_key or os.getenv("ANTHROPIC_API_KEY"),
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+
+    body = {
+        "model": os.getenv("TH_CLAUDE_MODEL", "claude-3-5-sonnet-20241022"),
+        "max_tokens": int(os.getenv("TH_CLAUDE_MAX_TOKENS", "1024")),
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": float(os.getenv("TH_CLAUDE_TEMPERATURE", "0.6")),
+    }
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            headers=headers,
+            json=body,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        return {
+            "message": data["content"][0]["text"],
+            "tokens": data.get("usage", {}).get("input_tokens", 0)
+            + data.get("usage", {}).get("output_tokens", 0),
         }
