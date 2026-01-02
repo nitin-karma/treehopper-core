@@ -1,9 +1,23 @@
-# Contributing to TreehopperAI
+# Contributing to TreehopperAI 🌱
 
-First of all — thank you for considering contributing to **TreehopperAI** 🌱
-This project is built to empower developers to create, orchestrate, and run AI agents locally and at scale.
+First of all — thank you for considering contributing to **TreehopperAI**.
 
-We welcome contributions of all kinds:
+TreehopperAI is a local-first agent orchestration runtime designed for clarity,
+control, and real-world execution. Contributions of all kinds are welcome.
+
+---
+
+## 🧭 Project Philosophy
+
+TreehopperAI follows a few non-negotiable principles:
+
+- **Local-first** — everything runs locally by default
+- **CLI-first** — predictable behavior via commands, logs, and files
+- **Agents & chains are services** — every unit must run independently
+- **Detached runtimes matter** — cancellation, replay, observability are core
+- **No magic** — explicit state, explicit lifecycle, explicit errors
+
+#### Contributions are welcomed:
 - Bug fixes
 - New agents
 - New chains
@@ -12,120 +26,130 @@ We welcome contributions of all kinds:
 - Examples and demos
 - Tooling around Treehopper
 
----
-
-## 🧭 Project Philosophy
-
-TreehopperAI follows a few core principles:
-
-- **Local-first** — everything should run local first with optional cloud/llm dependency
-- **CLI-first** — predictable behavior via terminal, logs, and files
-- **Agents & chains are services** — every unit must be runnable independently
-- **Detached runtimes are sacred** — cancellation, replay, and observability matter
-- **No magic** — explicit state, explicit logs, explicit lifecycle
-
 Please keep these in mind when contributing.
 
 ---
 
-## 🛠 Development Setup
+## 🌿 Branching & Workflow
+
+TreehopperAI uses a **PR-based workflow**.
+
+### Branches
+
+| Branch | Purpose |
+|------|--------|
+| `main` | Stable, production-ready releases |
+| `develop` | Active development & integration |
+| `feature/*` | New features |
+| `fix/*` | Bug fixes |
+| `docs/*` | Documentation changes |
+
+### Workflow
 
 ```bash
+# Always start from develop
+git checkout develop
+git pull origin develop
+
+# Create a feature branch
+git checkout -b feature/my-change
+
+# Work & commit
+git commit -m "feat: describe your change"
+
+# Push and open PR → develop
+git push origin feature/my-change
+
+```
+
+### 🚨 Direct pushes to main or develop are not allowed.
+All changes must go through Pull Requests with CI passing.
+
+### 🛠 Development Setup
+```
 git clone https://github.com/nitin-karma/treehopper-core.git
 cd treehopper-core
 pip install -e .
-Run the main server:
-
 th start --bg
-```
-
-## Swagger UI:
-```
 http://localhost:1567/docs
 
 ```
-## 🧪 Testing Strategy
 
-### Treehopper uses layered testing:
+### 🧪 Testing Strategy
+```
+Treehopper uses layered testing:
 
-- Unit tests (fast, isolated)
+- Unit tests
+
 pytest tests/unit
 
-- Integration tests (registry + runtime)
+
+- Integration tests
+
 pytest tests/integration
 
-- Real E2E tests (CLI-based, user-facing)
+
+- E2E smoke tests (CLI-based)
+
 scripts/e2e_smoke_treehopper_full.sh
 
-- ⚠️ E2E tests are NOT written in pytest by design
-They must run exactly how users run Treehopper.
 
-### 🧩 Contributing Agents
+- ⚠️ E2E tests intentionally run like real users and are not written in pytest.
+
 ```
-Agents live under:
 
+### 🧩 Example Agents
+Agents typically live under:
+```
 examples/<agent_name>/
 ├── handler.py
 ├── schema.py
 └── agent.yaml
-```
 
-### Requirements:
-- Clear input/output schema
-- Deterministic behavior in mock mode
-- Must be built and run via:
+- Requirements
+Clear input/output schema
+Deterministic behavior in mock mode
+Must pass:
 
-```
-th build <agent_name>
-th lint <agent_name>
-th call <agent_name> '{}'
+th lint <agent>
+th build <agent>
+th call <agent> '{}'
 
 ```
-### To create a separate runtime for the same agent
-```
-th agent start <agent_name> --detached
 
-```
 ### 🔗 Contributing Chains
-Chains must:
+#### Chains must:
 - Be reproducible
 - Use existing agents
 - Support detached mode
 - Emit meaningful step events
 
 ```
-Use:
-
-th chain build <chain_name> <agent_name> <agent_name>
-th chain start <chain_name> --detached --port <port>
+th chain build <chain_name> <agent1> <agent2>
+th chain start <chain_name> --detached
 th chain run <chain_name> --payload '{}' --detached
 
 ```
-### 📐 Code Style & Logging
 
+### 📐 Code Style & Rules
 - Python 3.10+
-- Prefer explicit functions over magic
-- Use logging.getLogger(__name__)
-- Avoid global side effects
+- Explicit > implicit
+- Prefer readability over cleverness
+- Use structured logging
 - Never break CLI contracts
+- No hidden network calls in tests
 
-## 📦 Dependency Rules
+### 📦 Dependencies
+- Avoid heavy dependencies unless justified
+- New dependencies must be explained in PR
+- No vendor API calls in CI or tests
 
-- Avoid heavy dependencies unless necessary
-- Any new dependency must be justified
-- No vendor API calls in tests
+### 📄 License
+By contributing, you agree that your work is licensed under the MIT License.
 
-## 📄 Licensing
-```
-By contributing, you agree that your contributions will be licensed under the MIT License.
-
-```
-
-## 🤝 Need Help?
-
+### 🤝 Need Help?
 - Open a GitHub Issue
 - Start a Discussion
-- Or tag maintainers in PRs
+- Comment on a PR
 
-### We’re building something meaningful — together.
-### 🚀 Welcome to TreehopperAI.
+### 🚀 We’re building something real — welcome to TreehopperAI.
