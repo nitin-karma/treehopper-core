@@ -1,0 +1,35 @@
+name: 🐛 Bug Report
+description: Report something that is broken or unexpected
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Describe the issue clearly.
+      placeholder: "When I run `th chain run ...`, it fails with..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `th start --bg`
+        2. Build chain `...`
+        3. Execute `...`
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: TreehopperAI version
+      placeholder: v0.1.0
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Error output
+      render: shell
