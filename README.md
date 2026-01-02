@@ -691,6 +691,24 @@ This vision reflects a personal belief shaped through learning and experimentati
 
 ---
 
+## 💬 Feedback & Support
+
+TreehopperAI is actively evolving and your feedback matters.
+
+- 🐛 Report bugs via **GitHub Issues**
+- ✨ Suggest features or improvements
+- ❓ Ask questions and get help
+
+👉 https://github.com/nitin-karma/treehopper-core/issues
+
+Please include:
+- TreehopperAI version
+- Command you ran
+- Logs (if applicable)
+
+Thank you for helping improve TreehopperAI 🌱
+
+
 <div align="center">
 
 <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20">
