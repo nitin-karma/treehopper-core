@@ -1,8 +1,10 @@
 name: TreehopperAI CI
 
 on:
-  push:
   pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
 
 jobs:
   test:
@@ -27,18 +29,21 @@ jobs:
         with:
           python-version: "3.10"
 
-      # ✅ Install Treehopper (editable)
-      - name: Install Treehopper
+      # ----------------------------------
+      # Install Treehopper
+      # ----------------------------------
+      - name: Install Treehopper (editable)
         run: |
           pip install --upgrade pip
           pip install -e .
 
-      # ✅ Install test dependencies from pyproject.toml
       - name: Install test dependencies
         run: |
           pip install -e ".[test]"
 
-      # ✅ ADDED: Run linters before tests
+      # ----------------------------------
+      # Linting & Type Checks
+      # ----------------------------------
       - name: Run Black (formatting check)
         run: |
           pip install black
@@ -53,27 +58,24 @@ jobs:
         run: |
           pip install mypy types-PyYAML types-requests types-setuptools types-tabulate
           mypy treehopper/ --python-version=3.10 --ignore-missing-imports --install-types --non-interactive
-        continue-on-error: true  # Don't fail CI on mypy issues (optional)
+        continue-on-error: true
 
       # ----------------------------------
-      # Unit Tests
+      # Tests
       # ----------------------------------
       - name: Run unit tests
         run: |
           pytest tests/unit -v
 
-      # ----------------------------------
-      # Integration Tests
-      # ----------------------------------
       - name: Run integration tests
         run: |
           pytest tests/integration -v
 
       # ----------------------------------
-      # E2E Smoke Test
+      # E2E Smoke Test (non-blocking)
       # ----------------------------------
       - name: Run E2E smoke test
         run: |
           chmod +x scripts/e2e_smoke_treehopper_full.sh
           ./scripts/e2e_smoke_treehopper_full.sh
-        continue-on-error: true  # Don't fail CI if E2E has issues
+        continue-on-error: true
