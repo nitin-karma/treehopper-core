@@ -291,7 +291,7 @@ Local-only user management (no cloud dependency)
  - Built chains
  - Running processes
  - Live system events
- ## <img src="treehopper/static/th_overview.png" alt="Treehopper Logo" width="400">
+ ## <img src="treehopper/static/th_overview.png" alt="Treehopper Logo" width="800">
 
 #### Analytics
 - Agent & chain execution metrics
