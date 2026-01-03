@@ -54,3 +54,11 @@ support_parallel
 support_escalation
 support_omnichannel
 support_production
+ws_customer_support
+ws_data_engineering_etl
+ws_drug_discovery
+ws_insurance_claims
+ws_oil_gas_monitoring
+ws_robotics_orchestration
+ws_semiconductor_rca
+ws_supply_chain
