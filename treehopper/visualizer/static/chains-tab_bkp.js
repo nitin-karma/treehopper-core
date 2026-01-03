@@ -90,7 +90,7 @@
 
        // Show chain info
        document.getElementById('chainId').textContent = currentChain.chain_id;
-       document.getElementById('chainSteps').textContent = currentChain.steps?.length || 0;
+       document.getElementById('chainSteps').textContent = currentChain.stepCount;
        document.getElementById('chainStatus').textContent = currentChain.status || 'Active';
        document.getElementById('chainStatus').className = `status-badge ${currentChain.status?.toLowerCase() || 'running'}`;
 
