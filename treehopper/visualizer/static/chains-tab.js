@@ -161,7 +161,7 @@
 
        // Show chain info
        document.getElementById('chainId').textContent = currentChain.chain_id || currentChain.chain_name;
-       document.getElementById('chainSteps').textContent = '?'; // Unknown without full config
+       document.getElementById('chainSteps').textContent = currentChain.stepCount;
        document.getElementById('chainStatus').textContent = currentChain.runtime_status || 'Running';
        document.getElementById('chainStatus').className = `status-badge ${currentChain.runtime_status?.toLowerCase() || 'running'}`;
 

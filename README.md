@@ -26,16 +26,6 @@ It is designed to study how agent orchestration systems behave when:
 - runtimes are long-lived and cancellable
 - workflows must remain deterministic and observable
 
-> ⚠️ **Project Disclaimer**
->
-> TreehopperAI is a personal, open-source learning project built outside of work hours.
-> It is **not affiliated with any employer**, does not use proprietary code or data,
-> and is **not positioned as a commercial product**.
->
-> The primary goal is to explore system design, orchestration patterns,
-> runtime behavior, and developer experience for AI agents in a transparent way.
-
-
 ### 🧭 What “Local-First” Means in TreehopperAI
 
 TreehopperAI is local-first by design:
@@ -45,6 +35,7 @@ TreehopperAI is local-first by design:
 - LLM providers are optional, pluggable dependencies
 - Mock and offline modes are fully supported
 - Cloud deployment is an opt-in convenience — not a requirement
+- 70+ CLI commands
 
 You own the runtime. You choose where intelligence comes from.
 
@@ -97,7 +88,7 @@ It brings together ideas such as:
 - ✔ Parallel execution
 - ✔ Cooperative cancellation
 - ✔ Edge-friendly deployment
-- ✔ CLI-first workflows
+- ✔ CLI-first workflows (70+ CLI commands)
 
 The goal is not to replace existing platforms, but to **understand the trade-offs**
 behind them by building a minimal, transparent alternative.
@@ -359,6 +350,10 @@ git clone <repo_url>
 cd treehopper-core
 pip install -e .
 
+# Setup the Workspace for development(do not create in same cloned directory)
+cd ..
+[treehopper / th] workspace create <n>
+
 # Setup the execution root
 [treehopper / th] setup
 
@@ -419,7 +414,7 @@ weather/
 └── schema.py    # Request/response models
 ```
 
-### Implement agent
+### You can implement agent like below as well but use CLIs (Recomended)
 
 ```python
 # handler.py
@@ -463,10 +458,11 @@ await call_llm("Compare wind vs hydro", provider="perplexity")
 
 **Supported providers:**
 
-- OpenAI (GPT-4o, GPT-4o-mini)
-- Google Gemini Pro
-- Perplexity (Mistral models)
-- Local mock provider (for testing)
+- OpenAI
+- Google Gemini
+- Perplexity
+- Claude
+- Local mock provider
 
 ---
 
@@ -506,23 +502,7 @@ http://localhost:<auto_port>/api/v1/<chain>/run
 
 ---
 
-## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Parallel Execution (Phase 3.2)
-
-Run a chain N times in parallel:
-
-```bash
-[treehopper / th] chain run my_chain --parallel 20 --concurrency 5
-```
-
-**Key points:**
-
-- Parallelization occurs across chains, not inside a chain
-- Throttle with `--concurrency` to avoid provider rate limits
-- Each parallel run has its own run_id, history, results
-
----
-
-## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Cancellation (Phase 3.3)
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Cancellation
 
 Treehopper supports cooperative async cancellation, similar to Temporal/Celery but at the agent-chain-runtime level.
 
@@ -577,7 +557,7 @@ Treehopper supports cooperative async cancellation, similar to Temporal/Celery b
 
 ---
 
-## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Cleaning Up
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Cleaning Up (! Be Carefull)
 
 ```bash
 [treehopper / th] clean
@@ -593,12 +573,23 @@ This command:
 
 ## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Full CLI Reference
 
+```
+To see all commands except chains :
+
+th help
+
+To see chains relates commands :
+
+th chain
+
+```
+
 ### Main Server
 
 | Command | Description |
 |---------|-------------|
-| `[treehopper / th] run` | Start main server |
-| `[treehopper / th] run --bg` | Start in background |
+| `[treehopper / th] start` | Start main server |
+| `[treehopper / th] start --bg` | Start in background |
 | `[treehopper / th] stop` | Stop main server |
 | `[treehopper / th] restart` | Restart |
 | `[treehopper / th] status` | Check health |
@@ -621,7 +612,6 @@ This command:
 | `[treehopper / th] chain stop` | Stop chain runtime |
 | `[treehopper / th] chain logs` | Show last run |
 | `[treehopper / th] chain cancel` | Cancel run(s) |
-| `[treehopper / th] chain cancel-batch` | Cancel batch |
 
 ---
 
@@ -709,8 +699,18 @@ Please include:
 Thank you for helping improve TreehopperAI 🌱
 
 
+
+> ⚠️ **Project Disclaimer**
+>
+> TreehopperAI is a personal, open-source learning project built outside of work hours.
+> It is **not affiliated with any employer**, does not use proprietary code or data,
+> and is **not positioned as a commercial product**.
+>
+> The primary goal is to explore system design, orchestration patterns,
+> runtime behavior, and developer experience for AI agents in a transparent way.
+
 <div align="center">
 
 <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20">
-Made with lot of hardwork
+Made with lot of hardwork and patience
 </div>

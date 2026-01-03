@@ -617,6 +617,10 @@ def get_app() -> FastAPI:
     # -------------------------------------------------------
     # CUSTOM DOCS & FAVICON
     # -------------------------------------------------------
+    @app.get("/", include_in_schema=False)
+    async def default_health():
+        return {"status": "ok"}
+
     @app.get("/favicon.ico", include_in_schema=False)
     async def favicon():
         return FileResponse(os.path.join(STATIC_DIR, "treehopper_favicon.png"))

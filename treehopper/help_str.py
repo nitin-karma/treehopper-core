@@ -20,14 +20,17 @@ Treehopper CLI Commands
 
   Agent Related CLI Commands -
   ============================
-  [treehopper | th] call <path> '<json>' | --payload-file  Call an agent using the json payload or a json file
-  [treehopper | th] init <agent_name>                     Create agent scaffold template
-  [treehopper | th] lint <agent_folder>                   Validate handler.py + YAML
-  [treehopper | th] build <agent_folder>                  Install agent to registry and run with main server
-  [treehopper | th] agent info <ref>                      Show metadata
-  [treehopper | th] agent start <name> --detached         Start dedicated agent runtime in background
-  [treehopper | th] agent stop <name>                     Stop detached agent runtime
-  [treehopper | th] agent delete <ref>                    Delete installed agent safely
+  [treehopper | th] call <path> '<json>' | --payload-file        Call an agent using the json payload or a json file
+  [treehopper | th] init <agent_name>                            Create agent scaffold template
+  [treehopper | th] lint <agent_folder>                          Validate handler.py + YAML
+  [treehopper | th] build <agent_folder>                         Install agent to registry and run with main server
+  [treehopper | th] agent info <ref>                             Show metadata
+  [treehopper | th] agent create <agent_name>                    Create agent from template
+         --from-template <template_name>
+  [treehopper | th] agent build <agent_name>                     Install agent to registry and run with main server
+  [treehopper | th] agent start <name> --detached                Start dedicated agent runtime in background
+  [treehopper | th] agent stop <name>                            Stop detached agent runtime
+  [treehopper | th] agent delete <ref>                           Delete installed agent safely
 
   UI Related CLI Commands
   ==========================

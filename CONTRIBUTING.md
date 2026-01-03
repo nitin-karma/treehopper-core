@@ -12,7 +12,7 @@ control, and real-world execution. Contributions of all kinds are welcome.
 TreehopperAI follows a few non-negotiable principles:
 
 - **Local-first** — everything runs locally by default
-- **CLI-first** — predictable behavior via commands, logs, and files
+- **CLI-first** — predictable behavior via commands, logs, and files(70+ CLI cmds)
 - **Agents & chains are services** — every unit must run independently
 - **Detached runtimes matter** — cancellation, replay, observability are core
 - **No magic** — explicit state, explicit lifecycle, explicit errors
@@ -67,11 +67,24 @@ All changes must go through Pull Requests with CI passing.
 
 ### 🛠 Development Setup
 ```
-git clone https://github.com/nitin-karma/treehopper-core.git
+git clone <repo_url>
 cd treehopper-core
 pip install -e .
-th start --bg
-http://localhost:1567/docs
+
+# Setup the Workspace for development(do not create in same cloned directory)
+cd ..
+[treehopper / th] workspace create <n>
+
+# Setup the execution root
+[treehopper / th] setup
+
+# View available commands
+[treehopper / th] whatis
+[treehopper / th] help
+[treehopper / th] chain help
+
+# Start main server
+[treehopper / th] start --bg
 
 ```
 
