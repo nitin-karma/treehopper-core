@@ -26,6 +26,36 @@ It is designed to study how agent orchestration systems behave when:
 - runtimes are long-lived and cancellable
 - workflows must remain deterministic and observable
 
+## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Quickstart
+
+![TreehopperAI Setup](treehopper/static/gifs/treehopper_setup_final.gif)
+
+```bash
+git clone https://github.com/nitin-karma/treehopper-core.git
+cd treehopper-core
+pip install -e .
+
+# Setup the Workspace for development(do not create in same cloned directory)
+cd ..
+[treehopper / th] workspace create <n>
+
+# Setup the execution root
+[treehopper / th] setup
+
+# View available commands
+[treehopper / th] whatis
+[treehopper / th] help
+[treehopper / th] chain help
+
+# Start main server
+[treehopper / th] start --bg
+```
+
+**Open Swagger UI:**
+[http://localhost:1567/docs](http://localhost:1567/docs)
+
+
+
 ### 🧭 What “Local-First” Means in TreehopperAI
 
 TreehopperAI is local-first by design:
@@ -342,32 +372,6 @@ LLM providers are opt-in and configurable.
 - Optional metrics & observability adapters
 - Community-contributed agent library
 
-
-## <img src="treehopper/static/treehopper_favicon.png" alt="Treehopper Logo" width="20"> Quickstart
-
-```bash
-git clone <repo_url>
-cd treehopper-core
-pip install -e .
-
-# Setup the Workspace for development(do not create in same cloned directory)
-cd ..
-[treehopper / th] workspace create <n>
-
-# Setup the execution root
-[treehopper / th] setup
-
-# View available commands
-[treehopper / th] whatis
-[treehopper / th] help
-[treehopper / th] chain help
-
-# Start main server
-[treehopper / th] start --bg
-```
-
-**Open Swagger UI:**
-[http://localhost:1567/docs](http://localhost:1567/docs)
 
 ---
 
