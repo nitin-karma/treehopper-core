@@ -17,7 +17,7 @@ TreehopperAI follows a few non-negotiable principles:
 - **Detached runtimes matter** — cancellation, replay, observability are core
 - **No magic** — explicit state, explicit lifecycle, explicit errors
 
-#### Contributions are welcomed:
+#### Contributions are welcome:
 - Bug fixes
 - New agents
 - New chains
